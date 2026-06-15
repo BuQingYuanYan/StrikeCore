@@ -10,6 +10,9 @@ err.txt
 test_output.txt
 *.dump
 
+# Runtime data (auto-created, contains user images & API keys)
+/data/
+
 # Editor / OS
 .DS_Store
 .idea/
