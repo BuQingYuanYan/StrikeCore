@@ -412,9 +412,10 @@ func (v *View) drawMessages(ly Layout) {
 // drawInput 渲染编辑器输入区域并返回光标位置。
 // 滚动计算委托给编辑器；此方法仅输出单元格。
 func (v *View) drawInput(e *editor.Editor, ly Layout) style.Cursor {
-	textW := ly.TextW - 1 // 右侧留 1 格间隙，使文字不贴背景边缘
-	starts := e.WrapLines(textW)
-	cl, cc := e.CursorPos(starts, textW)
+	wrapW := ly.TextW - 1 // 文字换行宽度，留 1 格边距
+	bgW := ly.TextW       // 背景填满整个输入区
+	starts := e.WrapLines(wrapW)
+	cl, cc := e.CursorPos(starts, wrapW)
 	e.EnsureVisible(cl, len(starts), InputRows)
 	scroll := e.ScrollLine()
 	var cur style.Cursor
@@ -444,13 +445,13 @@ func (v *View) drawInput(e *editor.Editor, ly Layout) style.Cursor {
 				} else if v.quitPending {
 					placeholder = "再按一次退出"
 				}
-				v.drawText(x, sy, v.padRight(placeholder, textW), v.theme.PlaceholderFg, v.theme.InputAreaBg)
+				v.drawText(x, sy, v.padRight(placeholder, bgW), v.theme.PlaceholderFg, v.theme.InputAreaBg)
 			} else {
 				text := editor.CharsToString(e.Slice(starts[li], end))
-				v.drawText(x, sy, v.padRight(text, textW), v.theme.InputTextFg, v.theme.InputAreaBg)
+				v.drawText(x, sy, v.padRight(text, bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
 			}
 		} else {
-			v.drawText(x, sy, v.getBgSpaces(textW), v.theme.InputTextFg, v.theme.InputAreaBg)
+			v.drawText(x, sy, v.getBgSpaces(bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
 		}
 		if li == cl {
 			cur = style.Cursor{Row: sy, Col: 1 + ly.EdgeX + PromptW + cc, Visible: true}
