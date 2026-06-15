@@ -1,0 +1,16 @@
+# Build artifacts
+*.exe
+*.exe~
+test_build*
+/dist/
+
+# Debug / capture dumps
+out.txt
+err.txt
+test_output.txt
+*.dump
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
