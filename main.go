@@ -10,6 +10,7 @@ import (
 
 	"strike-core/app"
 	"strike-core/internal/config"
+	"strike-core/internal/llm"
 )
 
 func main() {
@@ -28,14 +29,21 @@ func main() {
 
 	apiCfg := config.LoadAPI(dataDir)
 
-	_ = apiCfg // 供后续接入大模型使用
+	var provider llm.Provider
+	if apiCfg.APIKey != "" {
+		provider = llm.NewOpenAIProvider(llm.OpenAIConfig{
+			APIKey:  apiCfg.APIKey,
+			BaseURL: apiCfg.BaseURL,
+			Model:   apiCfg.Model,
+		})
+	}
 
 	if *showVersion {
 		fmt.Println(cfg.Version)
 		return
 	}
 
-	if err := app.Run(cfg, dataDir, workDir); err != nil {
+	if err := app.Run(cfg, dataDir, workDir, provider); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

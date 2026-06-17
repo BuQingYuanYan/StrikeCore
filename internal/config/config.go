@@ -27,30 +27,48 @@ var buildVersion string
 
 // Config 是供 ui/app 层使用的完全解析的运行时配置。
 type Config struct {
-	Version    string
-	ModelName  string
-	Hint       string
-	Brightness float64
-	BgPath     string        // external image override; empty => use embedded asset
-	BgInterval time.Duration // wallpaper slideshow interval (0 = off)
-	AsciiArt   []string
-	Theme      style.Theme
+	Version      string
+	ModelName    string
+	SystemPrompt string
+	Hint         string
+	Brightness   float64
+	BgPath       string        // external image override; empty => use embedded asset
+	BgInterval   time.Duration // wallpaper slideshow interval (0 = off)
+	AsciiArt     []string
+	Theme        style.Theme
 }
 
 // fileConfig 是 JSON 可解码子集。颜色为十六进制字符串以便文件保持人工可编辑；未设置的字段回退到默认值。
 type fileConfig struct {
-	Version    *string  `json:"version,omitempty"`
-	ModelName  *string  `json:"model_name,omitempty"`
-	Hint       *string  `json:"hint,omitempty"`
-	Brightness *float64 `json:"brightness,omitempty"`
-	BgPath     *string  `json:"bg_path,omitempty"`
-	BgInterval *int     `json:"bg_interval,omitempty"` // seconds, 0 = off
-	AsciiArt   []string `json:"ascii_art,omitempty"`
-	Theme      *struct {
-		ArtLeft  *string `json:"art_left,omitempty"`
-		ArtRight *string `json:"art_right,omitempty"`
-		HintFg   *string `json:"hint_fg,omitempty"`
-	} `json:"theme,omitempty"`
+	Version      *string  `json:"version,omitempty"`
+	ModelName    *string  `json:"model_name,omitempty"`
+	SystemPrompt *string  `json:"system_prompt,omitempty"`
+	Hint         *string  `json:"hint,omitempty"`
+	Brightness   *float64 `json:"brightness,omitempty"`
+	BgPath       *string  `json:"bg_path,omitempty"`
+	BgInterval   *int     `json:"bg_interval,omitempty"` // seconds, 0 = off
+	AsciiArt   []string  `json:"ascii_art,omitempty"`
+	Theme      *fileTheme `json:"theme,omitempty"`
+}
+
+// fileTheme 是 Theme 的 JSON 可解码子集，所有字段均为可选十六进制颜色。
+type fileTheme struct {
+	ArtLeft         *string `json:"art_left,omitempty"`
+	ArtRight        *string `json:"art_right,omitempty"`
+	InputAreaBg     *string `json:"input_area_bg,omitempty"`
+	InputTextFg     *string `json:"input_text_fg,omitempty"`
+	PromptFg        *string `json:"prompt_fg,omitempty"`
+	PromptBg        *string `json:"prompt_bg,omitempty"`
+	BlockEdgeFg     *string `json:"block_edge_fg,omitempty"`
+	BlockEdgeBg     *string `json:"block_edge_bg,omitempty"`
+	UserEdgeFg      *string `json:"user_edge_fg,omitempty"`
+	AssistantEdgeFg *string `json:"assistant_edge_fg,omitempty"`
+	SepFg           *string `json:"sep_fg,omitempty"`
+	DimFg           *string `json:"dim_fg,omitempty"`
+	PlaceholderFg   *string `json:"placeholder_fg,omitempty"`
+	HintFg          *string `json:"hint_fg,omitempty"`
+	ModelFg         *string `json:"model_fg,omitempty"`
+	LogoDepthBg     *string `json:"logo_depth_bg,omitempty"`
 }
 
 // APIConfig 存储模型 API 连接参数，用于后续接入大模型。
@@ -69,29 +87,34 @@ func DefaultAPI() APIConfig {
 }
 
 // LoadAPI 从 data/api.json 加载 API 配置，文件不存在时返回默认值。
+// STRIKE_API_KEY 环境变量优先级高于配置文件，便于 CI/CD 安全注入。
 func LoadAPI(dataDir string) APIConfig {
 	cfg := DefaultAPI()
 	path := filepath.Join(dataDir, "api.json")
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		return cfg
+	if err == nil {
+		var fc struct {
+			APIKey  *string `json:"api_key,omitempty"`
+			BaseURL *string `json:"base_url,omitempty"`
+			Model   *string `json:"model,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &fc); err == nil {
+			if fc.APIKey != nil {
+				cfg.APIKey = *fc.APIKey
+			}
+			if fc.BaseURL != nil {
+				cfg.BaseURL = *fc.BaseURL
+			}
+			if fc.Model != nil {
+				cfg.Model = *fc.Model
+			}
+		}
 	}
-	var fc struct {
-		APIKey  *string `json:"api_key,omitempty"`
-		BaseURL *string `json:"base_url,omitempty"`
-		Model   *string `json:"model,omitempty"`
+	if envKey := os.Getenv("STRIKE_API_KEY"); envKey != "" {
+		cfg.APIKey = envKey
 	}
-	if err := json.Unmarshal(raw, &fc); err != nil {
-		return cfg
-	}
-	if fc.APIKey != nil {
-		cfg.APIKey = *fc.APIKey
-	}
-	if fc.BaseURL != nil {
-		cfg.BaseURL = *fc.BaseURL
-	}
-	if fc.Model != nil {
-		cfg.Model = *fc.Model
+	if envURL := os.Getenv("STRIKE_API_URL"); envURL != "" {
+		cfg.BaseURL = envURL
 	}
 	return cfg
 }
@@ -111,12 +134,13 @@ func Default() Config {
 		version = buildVersion
 	}
 	return Config{
-		Version:    version,
-		ModelName:  "MiniMaxAI/MiniMax-M2.5",
-		Hint:       "↑ 输入内容，Ctrl+C 退出",
-		Brightness: 0.35,
-		BgPath:     "",
-		BgInterval: 60 * time.Second,
+		Version:      version,
+		ModelName:    "MiniMaxAI/MiniMax-M2.5",
+		SystemPrompt: "你是一个名为 StrikeCore 的终端 AI 智能体助手。请用中文回答用户的问题。回答简洁有力。",
+		Hint:         "↑ 输入内容，Ctrl+C 退出",
+		Brightness:   0.35,
+		BgPath:       "",
+		BgInterval:   60 * time.Second,
 		AsciiArt: []string{
 			"█▀▀▀ ▀█▀ █▀▀▄ ▀█▀ █ ▄▀ █▀▀▀  █▀▀▀ █▀▀█ █▀▀▄ █▀▀▀",
 			"▀▀▀█  █  █▀█   █  █▀▄  █▀▀   █    █  █ █▀█  ▀▀▀█",
@@ -158,11 +182,14 @@ func apply(cfg *Config, fc *fileConfig) error {
 	if fc.ModelName != nil {
 		cfg.ModelName = *fc.ModelName
 	}
+	if fc.SystemPrompt != nil {
+		cfg.SystemPrompt = *fc.SystemPrompt
+	}
 	if fc.Hint != nil {
 		cfg.Hint = *fc.Hint
 	}
 	if fc.Brightness != nil {
-		cfg.Brightness = *fc.Brightness
+		cfg.Brightness = clamp(*fc.Brightness, 0, 1)
 	}
 	if fc.BgPath != nil {
 		cfg.BgPath = *fc.BgPath
@@ -184,11 +211,60 @@ func apply(cfg *Config, fc *fileConfig) error {
 		if err := applyColor(&cfg.Theme.ArtRight, fc.Theme.ArtRight); err != nil {
 			return err
 		}
+		if err := applyColor(&cfg.Theme.InputAreaBg, fc.Theme.InputAreaBg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.InputTextFg, fc.Theme.InputTextFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.PromptFg, fc.Theme.PromptFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.PromptBg, fc.Theme.PromptBg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.BlockEdgeFg, fc.Theme.BlockEdgeFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.BlockEdgeBg, fc.Theme.BlockEdgeBg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.UserEdgeFg, fc.Theme.UserEdgeFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.AssistantEdgeFg, fc.Theme.AssistantEdgeFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.SepFg, fc.Theme.SepFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.DimFg, fc.Theme.DimFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.PlaceholderFg, fc.Theme.PlaceholderFg); err != nil {
+			return err
+		}
 		if err := applyColor(&cfg.Theme.HintFg, fc.Theme.HintFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.ModelFg, fc.Theme.ModelFg); err != nil {
+			return err
+		}
+		if err := applyColor(&cfg.Theme.LogoDepthBg, fc.Theme.LogoDepthBg); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func applyColor(dst *style.Color, hex *string) error {

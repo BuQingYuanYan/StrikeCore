@@ -1,4 +1,4 @@
-.PHONY: build run test lint fmt vet clean build-all
+.PHONY: build run test lint fmt vet clean build-all staticcheck vulncheck
 
 BINARY := strike-core
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
@@ -26,6 +26,12 @@ fmt:
 lint: vet
 	@echo "checking formatting..."
 	@test -z "$$(gofmt -l .)" || (echo "unformatted files:"; gofmt -l .; exit 1)
+
+staticcheck:
+	staticcheck ./...
+
+vulncheck:
+	govulncheck ./...
 
 # Cross-compile a release binary for each supported platform into dist/.
 build-all:

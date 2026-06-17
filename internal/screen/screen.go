@@ -59,6 +59,18 @@ func (s *Screen) Clear() {
 	}
 }
 
+// FillBg 用半块字符与逐格背景色快速填充整个屏幕，跳过 SetCell 的边界检查与宽字符处理。当背景图覆盖全屏时代替 Clear+逐格写入，减少一次全量遍历。
+func (s *Screen) FillBg(w, h int, topColors, botColors [][]style.Color) {
+	for y := 0; y < h && y < s.rows; y++ {
+		row := topColors[y]
+		rowBot := botColors[y]
+		base := y * s.cols
+		for x := 0; x < w && x < s.cols; x++ {
+			s.cells[base+x] = Cell{Ch: '▀', Fg: row[x], Bg: rowBot[x], W: 1}
+		}
+	}
+}
+
 // SetCell 在 (x,y) 处使用给定颜色写入一个 rune。宽字符会占据下一个单元格，该单元格标记为 W=-1。越界写入将被忽略。
 func (s *Screen) SetCell(x, y int, ch rune, fg, bg style.Color) {
 	if x < 0 || x >= s.cols || y < 0 || y >= s.rows {

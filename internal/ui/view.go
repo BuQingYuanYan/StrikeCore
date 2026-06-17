@@ -87,19 +87,21 @@ func (v *View) SetMessages(msgs []Message, scroll int) {
 // 并返回光标应处的位置。它不会刷新屏幕。
 func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 	v.bg.ensure(w, h)
-	v.screen.Clear()
-	v.drawBgImage(w, h)
+	if v.bg.topColors != nil {
+		v.screen.FillBg(w, h, v.bg.topColors, v.bg.botColors)
+	} else {
+		v.screen.Clear()
+	}
 
-	// 用与 CalcLayout 在有消息分支中一致的方式计算消息折行宽度
-	// （内容跨 x=3..Inner-1，减去提示符宽度），使布局前的行数统计与
-	// drawMessages 实际渲染的行数一致。
 	inner := w - 2
 	if inner < 1 {
 		inner = 1
 	}
 	msgTextW := max(max(inner-3, 1)-PromptW, 1)
 
-	msgLines := len(buildBubbleLines(v.messages, msgTextW))
+	// 仅计算一次气泡行，供布局计算和滚动流复用
+	bubbleLines := buildBubbleLines(v.messages, msgTextW)
+	msgLines := len(bubbleLines)
 	ly := CalcLayout(w, h, v.art.width, msgLines)
 	e.SetInputW(ly.TextW)
 
@@ -108,9 +110,7 @@ func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 	v.drawWorkDir(ly)
 	v.drawHint(ly)
 	if len(v.messages) > 0 {
-		// 有消息时，logo 与气泡合并成一条可滚动内容流，填充顶边框与
-		// 分隔线之间的视口；分隔线及其下方的输入栏/工作目录行固定不动。
-		v.drawScrollContent(ly)
+		v.drawScrollContent(ly, bubbleLines)
 	} else {
 		v.drawArt(ly)
 	}
@@ -352,16 +352,15 @@ func (v *View) drawArtMiddleRow(x, sy int, text string, leftW int) int {
 // 之间的内容行 [0, Sep1)（屏幕行 1..Sep1）。msgScroll 为流顶部裁掉的行数；
 // 默认（极大值）钳制到底部，使最新消息可见。钳制后的偏移写回 v.msgScroll，
 // 供事件循环读取，让“到底后上滚”从真实底部开始。
-func (v *View) drawScrollContent(ly Layout) {
+func (v *View) drawScrollContent(ly Layout, bubbleLines []msgLine) {
 	viewRows := ly.Sep1 // 内容行 0..Sep1-1
 	if viewRows <= 0 {
 		return
 	}
-	// 终端很小时 (h<15) sep1 会超出 rows；截断到可用内容行，防越界覆盖底边框。
 	if viewRows > ly.Rows {
 		viewRows = ly.Rows
 	}
-	stream := buildScrollStream(v.messages, len(v.art.texts), ly.TextW)
+	stream := buildScrollStream(len(v.art.texts), bubbleLines)
 	total := len(stream)
 
 	scroll := v.msgScroll

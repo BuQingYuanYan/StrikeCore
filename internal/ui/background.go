@@ -92,7 +92,27 @@ func ReadBgDirCfg(dir string) BgDirCfg {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return BgDirCfg{}
 	}
+	sanitizeBgDirCfg(&c)
 	return c
+}
+
+func sanitizeBgDirCfg(c *BgDirCfg) {
+	if c.BubbleBgOpacity != nil {
+		if *c.BubbleBgOpacity < 0 {
+			*c.BubbleBgOpacity = 0
+		}
+		if *c.BubbleBgOpacity > 1 {
+			*c.BubbleBgOpacity = 1
+		}
+	}
+	if c.Brightness != nil {
+		if *c.Brightness < 0 {
+			*c.Brightness = 0
+		}
+		if *c.Brightness > 1 {
+			*c.Brightness = 1
+		}
+	}
 }
 
 // ListBgImages 扫描目录中可识别的图片文件，并按字典顺序返回完整路径。

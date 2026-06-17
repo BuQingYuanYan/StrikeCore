@@ -17,6 +17,7 @@ import (
 	"strike-core/internal/config"
 	"strike-core/internal/editor"
 	"strike-core/internal/input"
+	"strike-core/internal/llm"
 	"strike-core/internal/screen"
 	"strike-core/internal/style"
 	"strike-core/internal/terminal"
@@ -41,7 +42,8 @@ const (
 const scrollStep = 3
 
 // Run 设置终端并运行 UI，直到用户退出或信号到达。即使发生恐慌或收到信号，终端也始终会恢复。
-func Run(cfg config.Config, dataDir string, workDir string) (err error) {
+// provider 可为 nil，此时使用内置的硬编码回复（离线/开发模式）。
+func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provider) (err error) {
 	// CJK 布局依赖于一致的宽度计算；显式固定以便行为不会随环境变化。
 	runewidth.DefaultCondition.EastAsianWidth = false
 
@@ -295,13 +297,10 @@ func Run(cfg config.Config, dataDir string, workDir string) (err error) {
 					if handleCommand(text, &messages, &msgScroll, view, bg, &bgImages, bgDir, &bgIndex, &bgSlideTicker, &bgSlideCh, &slideReady, &cfg) {
 						break
 					}
-					messages = append(messages,
-						ui.Message{Role: "user", Content: text},
-						ui.Message{
-							Role:    "assistant",
-							Content: "我是基于StrikeCore的AI智能体助手，请问有什么我可以为你帮助的吗？\n\n  1.我可以帮你整理文档\n\n  2.我可以帮你检查当前设备的运行状态\n\n 你可以试着向我提问。",
-						},
-					)
+					userMsg := ui.Message{Role: "user", Content: text}
+					messages = append(messages, userMsg)
+					reply := getAIResponse(ctx, provider, messages, cfg)
+					messages = append(messages, ui.Message{Role: "assistant", Content: reply})
 					msgScroll = 999999 // 自动滚动到底部，在 drawMessages 中限制
 				}
 		case input.KeyUp:
@@ -317,7 +316,12 @@ func Run(cfg config.Config, dataDir string, workDir string) (err error) {
 					}
 				}
 			case input.KeyScrollDown:
-				msgScroll += scrollStep
+				if msgScroll < 999999 {
+					msgScroll += scrollStep
+					if msgScroll > 999999 {
+						msgScroll = 999999
+					}
+				}
 			default:
 				if ed.HandleKey(code, r) {
 					return nil
@@ -331,6 +335,37 @@ func Run(cfg config.Config, dataDir string, workDir string) (err error) {
 			return nil
 		}
 	}
+}
+
+// getAIResponse 调用 LLM 获取回复。provider 为 nil 时返回内置兜底回复。
+func getAIResponse(ctx context.Context, provider llm.Provider, messages []ui.Message, cfg config.Config) string {
+	if provider == nil {
+		return "我是基于StrikeCore的AI智能体助手，请问有什么我可以为你帮助的吗？\n\n  1.我可以帮你整理文档\n\n  2.我可以帮你检查当前设备的运行状态\n\n 你可以试着向我提问。\n\n（提示：配置 data/api.json 并设置 API Key 即可接入真实大模型）"
+	}
+
+	llmMsgs := make([]llm.Message, 0, len(messages))
+	for _, m := range messages {
+		role := m.Role
+		if role == "assistant" {
+			role = "assistant"
+		} else {
+			role = "user"
+		}
+		llmMsgs = append(llmMsgs, llm.Message{Role: role, Content: m.Content})
+	}
+
+	opts := &llm.ChatOptions{
+		SystemPrompt: cfg.SystemPrompt,
+	}
+	if cfg.ModelName != "" {
+		opts.Model = cfg.ModelName
+	}
+
+	reply, err := provider.Chat(ctx, llmMsgs, opts)
+	if err != nil {
+		return fmt.Sprintf("（API 调用失败：%v）", err)
+	}
+	return reply
 }
 
 // handleCommand 处理以 / 开头的输入。返回 true 表示已作为命令处理完毕。

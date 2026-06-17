@@ -84,15 +84,21 @@ func (e *Editor) CursorPos(starts []int, inputW int) (line, col int) {
 	for i := starts[line]; i < e.cursor; i++ {
 		col += e.chars[i].W
 	}
-	if col >= inputW && line+1 < len(starts) {
-		return line + 1, 0
+	if col >= inputW {
+		if line+1 < len(starts) {
+			return line + 1, 0
+		}
+		return line, col
 	}
 	return line, col
 }
 
 // EnsureVisible 滚动以使 cursorLine 位于 inputRows 行视口内。它是纯状态计算（无渲染），提取出来以便独立于绘图进行单元测试。
 func (e *Editor) EnsureVisible(cursorLine, totalLines, inputRows int) {
-	e.scrollLine = min(e.scrollLine, max(0, totalLines-inputRows), cursorLine)
+	maxScroll := max(0, totalLines-inputRows)
+	if e.scrollLine > maxScroll {
+		e.scrollLine = maxScroll
+	}
 	if cursorLine >= e.scrollLine+inputRows {
 		e.scrollLine = cursorLine - inputRows + 1
 	}

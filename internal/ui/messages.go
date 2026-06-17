@@ -45,18 +45,18 @@ type streamLine struct {
 	bubble msgLine
 }
 
-// buildScrollStream 把横幅（版本号 + 艺术字）与所有气泡行拼成一条
+// buildScrollStream 把横幅（版本号 + 艺术字）与预计算的气泡行拼成一条
 // 自上而下的内容流，logo 在最前，因此向下滚动时 logo 会先滑出视口。
-// artRows 是艺术字的行数；textW 是气泡文本的折行宽度。
-func buildScrollStream(msgs []Message, artRows, textW int) []streamLine {
-	out := make([]streamLine, 0, artRows+len(msgs)*4+4)
+// artRows 是艺术字的行数。
+func buildScrollStream(artRows int, bubbleLines []msgLine) []streamLine {
+	out := make([]streamLine, 0, artRows+len(bubbleLines)+4)
 	out = append(out, streamLine{kind: streamBlank})
 	out = append(out, streamLine{kind: streamVersion})
 	for i := 0; i < artRows; i++ {
 		out = append(out, streamLine{kind: streamArt, artRow: i})
 	}
 	out = append(out, streamLine{kind: streamBlank}) // logo 与气泡之间的间隙
-	for _, bl := range buildBubbleLines(msgs, textW) {
+	for _, bl := range bubbleLines {
 		out = append(out, streamLine{kind: streamBubble, bubble: bl})
 	}
 	return out
