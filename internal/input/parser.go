@@ -57,6 +57,9 @@ func parseCSI(b []byte) (int, rune, int) {
 	if len(b) < 3 {
 		return KeyEscape, 0, 1
 	}
+	if b[2] == '<' {
+		return parseSGRMouse(b)
+	}
 	switch b[2] {
 	case 'A':
 		return KeyUp, 0, 3
@@ -84,4 +87,48 @@ func parseCSI(b []byte) (int, rune, int) {
 		}
 	}
 	return KeyEscape, 0, 1
+}
+
+// parseSGRMouse 解析 SGR 扩展鼠标序列 \x1b[<Cb;Cx;Cy(M|m)。
+// 仅关心滚轮：Cb=64 为上滚、Cb=65 为下滚。其余鼠标事件（点击/移动/拖拽）
+// 被完整消耗但映射为 KeyNone，以免污染输入流。
+// 序列不完整时返回 n==0，等待更多字节。
+func parseSGRMouse(b []byte) (int, rune, int) {
+	// 从 b[3] 起读取首个数字参数 Cb，直到遇到 ';' 或终结符。
+	cb := 0
+	haveCb := false
+	i := 3
+	for ; i < len(b); i++ {
+		c := b[i]
+		if c >= '0' && c <= '9' {
+			cb = cb*10 + int(c-'0')
+			haveCb = true
+		} else {
+			break
+		}
+	}
+	if !haveCb {
+		// 畸形序列，没有参数：丢弃 ESC 以免卡住。
+		return KeyNone, 0, 1
+	}
+	// 扫描终结符以确定序列长度；仅 'M'（按下）产生滚轮事件，
+	// 'm'（释放）被消耗并丢弃以防某些终端同时发送两次导致重复滚动。
+	for ; i < len(b); i++ {
+		if b[i] == 'M' {
+			n := i + 1
+			switch cb {
+			case 64:
+				return KeyScrollUp, 0, n
+			case 65:
+				return KeyScrollDown, 0, n
+			default:
+				return KeyNone, 0, n
+			}
+		}
+		if b[i] == 'm' {
+			return KeyNone, 0, i+1
+		}
+	}
+	// 终结符尚未到达：等待更多字节。
+	return KeyNone, 0, 0
 }

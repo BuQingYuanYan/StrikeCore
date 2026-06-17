@@ -34,6 +34,12 @@ func TestParse(t *testing.T) {
 		{"unknown control", []byte("\x01"), KeyNone, 0, 0},
 		{"cjk rune", []byte("世"), KeyRune, '世', 3},
 		{"incomplete utf8 tail", []byte{0xE4, 0xB8}, KeyNone, 0, 0},
+		{"sgr wheel up", []byte("\x1b[<64;10;20M"), KeyScrollUp, 0, 12},
+		{"sgr wheel down", []byte("\x1b[<65;10;20M"), KeyScrollDown, 0, 12},
+		{"sgr left click", []byte("\x1b[<0;5;5M"), KeyNone, 0, 9},
+		{"sgr release", []byte("\x1b[<0;5;5m"), KeyNone, 0, 9},
+		{"sgr wheel down release", []byte("\x1b[<65;10;20m"), KeyNone, 0, 12},
+		{"sgr incomplete", []byte("\x1b[<64;10;2"), KeyNone, 0, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

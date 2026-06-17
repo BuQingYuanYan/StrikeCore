@@ -20,4 +20,6 @@ const (
 	KeyEscape
 	KeyQuit
 	KeyRune
+	KeyScrollUp   // 鼠标滚轮向上
+	KeyScrollDown // 鼠标滚轮向下
 )

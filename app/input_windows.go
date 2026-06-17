@@ -115,6 +115,26 @@ func readInput(ctx context.Context, term terminal.Terminal, inputCh chan<- []byt
 			case <-ctx.Done():
 				return
 			}
+
+		case terminal.MouseEvent:
+			me := rec.AsMouseEvent()
+			if me.EventFlags&terminal.MouseWheeled == 0 {
+				continue // 只关心垂直滚轮
+			}
+			// 滚轮增量在 ButtonState 的高 16 位，按有符号处理：
+			// 正=向上滚，负=向下滚。转成解析器识别的 SGR 字节序列。
+			delta := int16(me.ButtonState >> 16)
+			var seq []byte
+			if delta > 0 {
+				seq = []byte("\x1b[<64;1;1M")
+			} else {
+				seq = []byte("\x1b[<65;1;1M")
+			}
+			select {
+			case inputCh <- seq:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

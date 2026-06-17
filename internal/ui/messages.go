@@ -28,6 +28,40 @@ type msgLine struct {
 	text   string
 }
 
+// streamKind 标识合并滚动流中一行的类型。
+type streamKind int
+
+const (
+	streamBlank   streamKind = iota // 纯背景图行（透出背景）
+	streamVersion                   // 版本号行
+	streamArt                       // 横幅艺术字行（artRow 指明第几行）
+	streamBubble                    // 气泡行（bubble 字段携带 msgLine）
+)
+
+// streamLine 是“logo + 气泡”合并滚动流中的一行。
+type streamLine struct {
+	kind   streamKind
+	artRow int
+	bubble msgLine
+}
+
+// buildScrollStream 把横幅（版本号 + 艺术字）与所有气泡行拼成一条
+// 自上而下的内容流，logo 在最前，因此向下滚动时 logo 会先滑出视口。
+// artRows 是艺术字的行数；textW 是气泡文本的折行宽度。
+func buildScrollStream(msgs []Message, artRows, textW int) []streamLine {
+	out := make([]streamLine, 0, artRows+len(msgs)*4+4)
+	out = append(out, streamLine{kind: streamBlank})
+	out = append(out, streamLine{kind: streamVersion})
+	for i := 0; i < artRows; i++ {
+		out = append(out, streamLine{kind: streamArt, artRow: i})
+	}
+	out = append(out, streamLine{kind: streamBlank}) // logo 与气泡之间的间隙
+	for _, bl := range buildBubbleLines(msgs, textW) {
+		out = append(out, streamLine{kind: streamBubble, bubble: bl})
+	}
+	return out
+}
+
 // buildBubbleLines 把每条消息展开成它的气泡行：一行空白填充行、若干折行文本行、
 // 一行空白填充行 —— 相邻气泡之间插入一行间隙行。textW 是文本行的折行宽度。
 func buildBubbleLines(msgs []Message, textW int) []msgLine {

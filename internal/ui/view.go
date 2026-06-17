@@ -107,11 +107,20 @@ func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 	v.drawVerticalBorders(ly)
 	v.drawWorkDir(ly)
 	v.drawHint(ly)
-	v.drawArt(ly)
-	v.drawMessages(ly)
+	if len(v.messages) > 0 {
+		// 有消息时，logo 与气泡合并成一条可滚动内容流，填充顶边框与
+		// 分隔线之间的视口；分隔线及其下方的输入栏/工作目录行固定不动。
+		v.drawScrollContent(ly)
+	} else {
+		v.drawArt(ly)
+	}
 	v.drawSeparators(ly)
 	return v.drawInput(e, ly)
 }
+
+// ScrollOffset 返回上一次 Render 钳制后的滚动偏移，供事件循环写回，
+// 使“滚动到底部”（传入极大值）后再上滚能从真实底部开始。
+func (v *View) ScrollOffset() int { return v.msgScroll }
 
 func (v *View) drawBgImage(w, h int) {
 	if v.bg.topColors == nil {
@@ -263,22 +272,35 @@ func (v *View) drawArt(ly Layout) {
 		if row < 0 || row >= ly.Rows {
 			continue
 		}
-		sy := row + 1
-		x := 1 + ly.ArtPad
-		text := v.art.texts[i]
-		leftW := v.art.leftW[i]
-		if i == 1 {
-			x = v.drawArtMiddleRow(x, sy, text, leftW)
-		} else {
-			x = v.drawArtPlainRow(x, sy, text, leftW)
-		}
-		if i == len(v.art.texts)-1 {
-			v.drawTextImgBg(x, sy, " "+v.cfg.ModelName, v.theme.ModelFg)
-		}
+		v.drawArtRowAt(i, row+1)
 	}
 	if ly.VerRow >= 0 {
 		v.drawTextImgBg(1+ly.ArtPad, ly.VerRow+1, v.cfg.Version, v.theme.DimFg)
 	}
+}
+
+// drawArtRowAt 在屏幕行 sy 处绘制第 i 行艺术字（含模型名后缀），
+// 横向位置沿用 ArtPad。供居中布局和滚动流共用。
+func (v *View) drawArtRowAt(i, sy int) {
+	if i < 0 || i >= len(v.art.texts) {
+		return
+	}
+	x := 1 + v.artPad()
+	text := v.art.texts[i]
+	leftW := v.art.leftW[i]
+	if i == 1 {
+		x = v.drawArtMiddleRow(x, sy, text, leftW)
+	} else {
+		x = v.drawArtPlainRow(x, sy, text, leftW)
+	}
+	if i == len(v.art.texts)-1 {
+		v.drawTextImgBg(x, sy, " "+v.cfg.ModelName, v.theme.ModelFg)
+	}
+}
+
+// artPad 返回横幅的左侧居中内边距，基于当前屏幕宽度计算。
+func (v *View) artPad() int {
+	return max((v.screen.Cols()-2-v.art.width)/2, 0)
 }
 
 func (v *View) drawArtPlainRow(x, sy int, text string, leftW int) int {
@@ -326,88 +348,96 @@ func (v *View) drawArtMiddleRow(x, sy int, text string, leftW int) int {
 	return cx
 }
 
-// drawMessages 把会话渲染成气泡。每条消息是一个气泡：一行空白填充行、若干折行
-// 文本行、一行空白填充行。气泡之间用一行间隙行透出背景图。每一行气泡行（填充行 +
-// 文本行）都在 EdgeX 处绘制块边（▌），并铺一条 x=EdgeX+1..Inner-1 的背景，使两侧
-// 各距竖线留 1 列间隙。块边颜色区分说话者：用户 vs 助手。
-func (v *View) drawMessages(ly Layout) {
-	if len(v.messages) == 0 || ly.MsgRows <= 0 {
+// drawScrollContent 渲染“logo + 气泡”合并滚动流。视口是顶边框与分隔线
+// 之间的内容行 [0, Sep1)（屏幕行 1..Sep1）。msgScroll 为流顶部裁掉的行数；
+// 默认（极大值）钳制到底部，使最新消息可见。钳制后的偏移写回 v.msgScroll，
+// 供事件循环读取，让“到底后上滚”从真实底部开始。
+func (v *View) drawScrollContent(ly Layout) {
+	viewRows := ly.Sep1 // 内容行 0..Sep1-1
+	if viewRows <= 0 {
 		return
 	}
-
-	lines := buildBubbleLines(v.messages, ly.TextW)
-	totalLines := len(lines)
-	if totalLines == 0 {
-		return
+	// 终端很小时 (h<15) sep1 会超出 rows；截断到可用内容行，防越界覆盖底边框。
+	if viewRows > ly.Rows {
+		viewRows = ly.Rows
 	}
+	stream := buildScrollStream(v.messages, len(v.art.texts), ly.TextW)
+	total := len(stream)
 
 	scroll := v.msgScroll
-	maxScroll := max(0, totalLines-ly.MsgRows)
+	maxScroll := max(0, total-viewRows)
 	if scroll > maxScroll {
 		scroll = maxScroll
 	}
 	if scroll < 0 {
 		scroll = 0
 	}
+	v.msgScroll = scroll // 写回钳制结果
 
-	visible := lines[scroll:]
-	if len(visible) > ly.MsgRows {
-		visible = visible[:ly.MsgRows]
-	}
-
-	contentX := ly.EdgeX + 1           // 气泡背景的第一列
-	bgW := max(ly.Inner-ly.EdgeX-1, 0) // x=contentX..Inner-1，右侧留 1 列间隙
+	contentX := ly.EdgeX + 1
+	bgW := max(ly.Inner-ly.EdgeX-1, 0)
 	opacity := v.bubbleBgOpacity
 
-	// bubbleBg 返回 x,y 处经透明度混合后的气泡背景色。
+	for r := 0; r < viewRows; r++ {
+		idx := scroll + r
+		if idx >= total {
+			break
+		}
+		sy := r + 1 // 屏幕行：内容行 0 在 y=1
+		switch line := stream[idx]; line.kind {
+		case streamBlank:
+			// 透出背景图 —— 不绘制内容。
+		case streamVersion:
+			v.drawTextImgBg(1+v.artPad(), sy, v.cfg.Version, v.theme.DimFg)
+		case streamArt:
+			v.drawArtRowAt(line.artRow, sy)
+		case streamBubble:
+			v.drawBubbleLineAt(line.bubble, sy, contentX, bgW, opacity)
+		}
+	}
+}
+
+// drawBubbleLineAt 在屏幕行 sy 处绘制一条气泡行（填充行或文本行）：
+// 在 EdgeX 处画块边（▌），并铺背景条。间隙行透出背景图，不绘制。
+func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity float64) {
+	if line.kind == kindGap {
+		return
+	}
 	bubbleBg := func(x, y int) style.Color {
 		if opacity <= 0 {
 			return v.theme.InputAreaBg
 		}
 		return v.theme.InputAreaBg.Blend(v.bg.BotColor(x, y), opacity)
 	}
-
-	edgeFg := func(idx int) style.Color {
-		if v.messages[idx].Role == "assistant" {
-			return v.theme.AssistantEdgeFg
-		}
-		return v.theme.UserEdgeFg
+	edgeFg := v.theme.UserEdgeFg
+	if line.msgIdx >= 0 && line.msgIdx < len(v.messages) && v.messages[line.msgIdx].Role == "assistant" {
+		edgeFg = v.theme.AssistantEdgeFg
 	}
 
-	for r, line := range visible {
-		sy := ly.MsgTop + r + 1
-		if sy >= ly.Sep1+1 {
-			break
-		}
-		if line.kind == kindGap {
-			// 透出背景图 —— 不绘制任何内容。
-			continue
-		}
-		// 填充行和文本行都绘制块边 + 背景条。
-		v.screen.SetCell(ly.EdgeX, sy, '▌', edgeFg(line.msgIdx), bubbleBg(ly.EdgeX, sy))
-		if opacity <= 0 {
-			// 纯色：直接用 drawText 批量绘制，性能最优。
-			if line.kind == kindText {
-				v.drawText(contentX, sy, v.padRight(" "+line.text, bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
-			} else {
-				v.drawText(contentX, sy, v.getBgSpaces(bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
-			}
+	v.screen.SetCell(v.bubbleEdgeX(contentX), sy, '▌', edgeFg, bubbleBg(v.bubbleEdgeX(contentX), sy))
+	if opacity <= 0 {
+		if line.kind == kindText {
+			v.drawText(contentX, sy, v.padRight(" "+line.text, bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
 		} else {
-			// 半透明：逐格混合背景图颜色。
-			var runes []rune
-			if line.kind == kindText {
-				runes = []rune(v.padRight(" "+line.text, bgW))
-			} else {
-				runes = []rune(v.getBgSpaces(bgW))
-			}
-			cx := contentX
-			for _, ch := range runes {
-				v.screen.SetCell(cx, sy, ch, v.theme.InputTextFg, bubbleBg(cx, sy))
-				cx += runewidth.RuneWidth(ch)
-			}
+			v.drawText(contentX, sy, v.getBgSpaces(bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
 		}
+		return
+	}
+	var runes []rune
+	if line.kind == kindText {
+		runes = []rune(v.padRight(" "+line.text, bgW))
+	} else {
+		runes = []rune(v.getBgSpaces(bgW))
+	}
+	cx := contentX
+	for _, ch := range runes {
+		v.screen.SetCell(cx, sy, ch, v.theme.InputTextFg, bubbleBg(cx, sy))
+		cx += runewidth.RuneWidth(ch)
 	}
 }
+
+// bubbleEdgeX 返回块边（▌）所在列：内容列减 1。
+func (v *View) bubbleEdgeX(contentX int) int { return contentX - 1 }
 
 // drawInput 渲染编辑器输入区域并返回光标位置。
 // 滚动计算委托给编辑器；此方法仅输出单元格。

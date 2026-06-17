@@ -31,7 +31,14 @@ const (
 	showCursor     = "\x1b[?25h"
 	clearScreen    = "\x1b[2J"
 	cursorHome     = "\x1b[H"
+	// 鼠标上报：?1000h 开启按键事件上报，?1006h 启用 SGR 扩展坐标编码
+	//（坐标无 223 上限，且滚轮/释放可区分）。离开会话时成对关闭。
+	enableMouse  = "\x1b[?1000h\x1b[?1006h"
+	disableMouse = "\x1b[?1006l\x1b[?1000l"
 )
+
+// scrollStep 是一次滚轮事件滚动的行数。
+const scrollStep = 3
 
 // Run 设置终端并运行 UI，直到用户退出或信号到达。即使发生恐慌或收到信号，终端也始终会恢复。
 func Run(cfg config.Config, dataDir string, workDir string) (err error) {
@@ -116,6 +123,9 @@ func Run(cfg config.Config, dataDir string, workDir string) (err error) {
 		}
 		view.SetMessages(messages, msgScroll)
 		cur := view.Render(ed, w, h)
+		// Render 会把 msgScroll 钳制到合法范围（尤其是发送消息后设的
+		// “滚动到底部”哨兵值）；读回钳制结果，使后续滚轮上滚从真实底部开始。
+		msgScroll = view.ScrollOffset()
 		s.Flush(cur)
 	}
 
@@ -306,6 +316,16 @@ func Run(cfg config.Config, dataDir string, workDir string) (err error) {
 				} else {
 					ed.HandleKey(code, r)
 				}
+			case input.KeyScrollUp:
+				// 滚轮始终滚动消息，与编辑器是否有内容无关。
+				if msgScroll > 0 {
+					msgScroll -= scrollStep
+					if msgScroll < 0 {
+						msgScroll = 0
+					}
+				}
+			case input.KeyScrollDown:
+				msgScroll += scrollStep
 			default:
 				if ed.HandleKey(code, r) {
 					return nil
@@ -403,11 +423,13 @@ func handleCommand(text string, messages *[]ui.Message, msgScroll *int, view *ui
 func enterSession(out io.Writer) {
 	io.WriteString(out, enterAltScreen)
 	io.WriteString(out, hideCursor)
+	io.WriteString(out, enableMouse)
 	io.WriteString(out, clearScreen)
 	io.WriteString(out, cursorHome)
 }
 
 func leaveSession(out io.Writer) {
+	io.WriteString(out, disableMouse)
 	io.WriteString(out, showCursor)
 	io.WriteString(out, leaveAltScreen)
 }

@@ -13,9 +13,12 @@ import (
 const (
 	enableVirtualTerminalProcessing = 0x0004
 	enableWindowInput               = 0x0008
+	enableMouseInput                = 0x0010
 	enableEchoInput                 = 0x0004
 	enableLineInput                 = 0x0002
 	enableProcessedInput            = 0x0001
+	enableQuickEditMode             = 0x0040
+	enableExtendedFlags             = 0x0080
 )
 
 var (
@@ -52,6 +55,7 @@ type windowsTerminal struct {
 
 const (
 	KeyEvent              = 0x0001
+	MouseEvent            = 0x0002
 	WindowBufferSizeEvent = 0x0004
 )
 
@@ -65,11 +69,31 @@ type KeyEventRecord struct {
 	ControlKeyState uint32
 }
 
+// MouseEventRecord 映射 Windows MOUSE_EVENT_RECORD 结构体。它与
+// KeyEventRecord 共享 INPUT_RECORD 联合体（两者均为 16 字节）。
+type MouseEventRecord struct {
+	MousePosition   coord
+	ButtonState     uint32
+	ControlKeyState uint32
+	EventFlags      uint32
+}
+
+// 鼠标事件标志位与按键状态。
+const (
+	MouseWheeled = 0x0004 // dwEventFlags：垂直滚轮事件
+)
+
 // InputRecord 映射 Windows INPUT_RECORD 结构体（EventType + 联合体）。
 type InputRecord struct {
 	EventType uint16
 	_         [2]byte // padding to align the union to 4 bytes
 	KeyEvent  KeyEventRecord
+}
+
+// AsMouseEvent 把联合体重新解释为鼠标事件记录。仅当
+// EventType == MouseEvent 时调用方可信赖其内容。
+func (r *InputRecord) AsMouseEvent() MouseEventRecord {
+	return *(*MouseEventRecord)(unsafe.Pointer(&r.KeyEvent))
 }
 
 // dwControlKeyState 标志位。
@@ -142,7 +166,12 @@ func (t *windowsTerminal) Init() (func(), error) {
 	prevMode, haveMode := uint32(0), false
 	if m, err := getConsoleMode(t.inFd); err == nil {
 		prevMode, haveMode = m, true
-		rawMode := (m &^ (enableEchoInput | enableLineInput | enableProcessedInput)) | enableWindowInput
+		// 开启窗口与鼠标事件上报；关闭行编辑/回显/快速编辑。
+		// QuickEdit 必须关闭，否则控制台会把鼠标拖拽吞掉用于选区，
+		// 鼠标事件无法送达 ReadConsoleInput；关闭它需要同时设置
+		// ExtendedFlags 位才能生效。
+		rawMode := (m &^ (enableEchoInput | enableLineInput | enableProcessedInput | enableQuickEditMode)) |
+			enableWindowInput | enableMouseInput | enableExtendedFlags
 		_ = setConsoleMode(t.inFd, rawMode)
 	}
 
