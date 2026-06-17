@@ -304,18 +304,10 @@ func Run(cfg config.Config, dataDir string, workDir string) (err error) {
 					)
 					msgScroll = 999999 // 自动滚动到底部，在 drawMessages 中限制
 				}
-			case input.KeyUp:
-				if ed.Len() == 0 && msgScroll > 0 {
-					msgScroll--
-				} else {
-					ed.HandleKey(code, r)
-				}
-			case input.KeyDown:
-				if ed.Len() == 0 {
-					msgScroll++
-				} else {
-					ed.HandleKey(code, r)
-				}
+		case input.KeyUp:
+			ed.HandleKey(code, r)
+		case input.KeyDown:
+			ed.HandleKey(code, r)
 			case input.KeyScrollUp:
 				// 滚轮始终滚动消息，与编辑器是否有内容无关。
 				if msgScroll > 0 {
