@@ -8,8 +8,9 @@ import (
 
 // Message 表示会话历史中的一条记录。
 type Message struct {
-	Role    string // "user" 或 "assistant"
-	Content string
+	Role      string // "user" 或 "assistant"
+	Content   string
+	Reasoning string // 模型的思考过程（如 DeepSeek-R1 的 reasoning_content）
 }
 
 // lineKind 标识一行渲染出的气泡行的类型。
@@ -23,9 +24,10 @@ const (
 
 // msgLine 是会话区中渲染出的一行。
 type msgLine struct {
-	kind   lineKind
-	msgIdx int
-	text   string
+	kind        lineKind
+	msgIdx      int
+	text        string
+	isReasoning bool // 思考过程行，用较暗的颜色渲染
 }
 
 // streamKind 标识合并滚动流中一行的类型。
@@ -64,6 +66,7 @@ func buildScrollStream(artRows int, bubbleLines []msgLine) []streamLine {
 
 // buildBubbleLines 把每条消息展开成它的气泡行：一行空白填充行、若干折行文本行、
 // 一行空白填充行 —— 相邻气泡之间插入一行间隙行。textW 是文本行的折行宽度。
+// 如果消息带有 Reasoning，先显示思考过程（isReasoning=true），再显示最终回答。
 func buildBubbleLines(msgs []Message, textW int) []msgLine {
 	var out []msgLine
 	for i, m := range msgs {
@@ -71,6 +74,12 @@ func buildBubbleLines(msgs []Message, textW int) []msgLine {
 			out = append(out, msgLine{kind: kindGap, msgIdx: -1})
 		}
 		out = append(out, msgLine{kind: kindPad, msgIdx: i})
+		if m.Reasoning != "" {
+			wraps := wrapLines(m.Reasoning, textW)
+			for _, w := range wraps {
+				out = append(out, msgLine{kind: kindText, msgIdx: i, text: w, isReasoning: true})
+			}
+		}
 		wraps := wrapLines(m.Content, textW)
 		if len(wraps) == 0 {
 			wraps = []string{""}
@@ -100,21 +109,23 @@ func wrapLines(text string, maxW int) []string {
 		n := len(runes)
 		start := 0
 		for start < n {
-			if n-start <= maxW {
-				lines = append(lines, string(runes[start:]))
-				break
-			}
 			breakAt := -1
 			w := 0
+			reachedEnd := true
 			for i := start; i < n; i++ {
 				rw := runewidth.RuneWidth(runes[i])
 				if w+rw > maxW {
+					reachedEnd = false
 					break
 				}
 				w += rw
 				if runes[i] == ' ' {
 					breakAt = i
 				}
+			}
+			if reachedEnd {
+				lines = append(lines, string(runes[start:]))
+				break
 			}
 			if breakAt <= start {
 				w = 0

@@ -53,11 +53,11 @@ var bgExts = []string{".png", ".jpg", ".jpeg"}
 // BgDirCfg 是 backgrounds 目录下 (config.json) 中的可选 JSON 配置。
 // 允许用户无需编辑主配置文件即可控制轮播行为和当前壁纸。
 type BgDirCfg struct {
-	Enabled          *bool    `json:"enabled,omitempty"`
-	Interval         *int     `json:"interval,omitempty"`  // 秒
-	Wallpaper        *string  `json:"wallpaper,omitempty"` // 文件名
-	BubbleBgOpacity  *float64 `json:"bubble_bg_opacity,omitempty"` // 气泡背景透明度 0..1
-	Brightness       *float64 `json:"brightness,omitempty"` // 图片亮度 0..1
+	Enabled         *bool    `json:"enabled,omitempty"`
+	Interval        *int     `json:"interval,omitempty"`          // 秒
+	Wallpaper       *string  `json:"wallpaper,omitempty"`         // 文件名
+	BubbleBgOpacity *float64 `json:"bubble_bg_opacity,omitempty"` // 气泡背景透明度 0..1
+	Brightness      *float64 `json:"brightness,omitempty"`        // 图片亮度 0..1
 }
 
 // defaultDirCfgJSON 在首次运行时写入 backgrounds/config.json，

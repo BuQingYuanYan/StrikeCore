@@ -29,6 +29,10 @@ type View struct {
 	quitPending     bool    // 第一次 Ctrl+C 等待确认退出
 	flashMsg        string  // 一次性提示，显示在输入栏占位处，有按键输入时清除
 
+	// 鲨鱼游泳动画状态
+	sharkFrame  int  // 当前帧 0~5
+	sharkActive bool // true = 回复中显示动画, false = 显示 [StrikeCore]
+
 	// 按尺寸缓存的字符串
 	borderCacheW int
 	borderTop    string
@@ -39,6 +43,29 @@ type View struct {
 	bgSpaces     string
 	workLineDir  string
 	workLine     string
+}
+
+// SharkGradient 是鲨鱼动画 5 个方块位置的海洋渐变蓝。
+var SharkGradient = [5]style.Color{
+	style.RGB(0x00, 0x44, 0x77), // 最深
+	style.RGB(0x00, 0x66, 0xAA),
+	style.RGB(0x00, 0x88, 0xCC),
+	style.RGB(0x00, 0xAA, 0xEE),
+	style.RGB(0x33, 0xBB, 0xFF), // 最浅
+}
+
+// SetSharkFrame 设置当前鲨鱼动画帧（0~4），对应 5 个游动位置。
+func (v *View) SetSharkFrame(n int) {
+	v.sharkFrame = n % 5
+}
+
+// SharkFrame 返回当前鲨鱼动画帧。
+func (v *View) SharkFrame() int {
+	return v.sharkFrame
+}
+// SetSharkActive 控制是否显示鲨鱼动画（true=回复中，false=显示[StrikeCore]）。
+func (v *View) SetSharkActive(active bool) {
+	v.sharkActive = active
 }
 
 // NewView 从依赖项构建一个 View。
@@ -227,19 +254,19 @@ func (v *View) drawWorkDir(ly Layout) {
 	if len(v.messages) > 0 {
 		hint := v.cfg.Hint
 		dir := v.workDir
-		prefix := "[StrikeCore] "
-		text := prefix + dir
-		// 提示右对齐，用主题色绘制，前面至少空 1 格，始终在右竖线前留 1 列间隙。
 		x := 2
-		x = v.drawTextImgBg(x, ly.WorkRow+1, text, v.theme.DimFg)
-		remaining := ly.Inner - x // 右竖线在 Inner+1，留 1 格间隙
+		if v.sharkActive {
+			x = v.drawSharkAnimation(x, ly.WorkRow+1)
+		} else {
+			x = v.drawTextImgBg(x, ly.WorkRow+1, "[StrikeCore]", v.theme.DimFg)
+		}
+		x = v.drawTextImgBg(x, ly.WorkRow+1, " "+dir, v.theme.DimFg)
+		remaining := ly.Inner - x
 		if remaining > runewidth.StringWidth(hint)+1 {
-			// 有足够空间：填充间隙 + 空格 + 提示
 			gap := remaining - runewidth.StringWidth(hint)
 			x = v.drawTextImgBg(x, ly.WorkRow+1, strings.Repeat(" ", gap), v.theme.DimFg)
 			v.drawTextImgBg(x, ly.WorkRow+1, hint, v.theme.HintFg)
 		} else {
-			// 空间不够：只填充到 Inner，不显示提示
 			v.drawTextImgBg(x, ly.WorkRow+1, strings.Repeat(" ", remaining), v.theme.DimFg)
 		}
 	} else {
@@ -293,9 +320,32 @@ func (v *View) drawArtRowAt(i, sy int) {
 	} else {
 		x = v.drawArtPlainRow(x, sy, text, leftW)
 	}
-	if i == len(v.art.texts)-1 {
+	if i == len(v.art.texts)-1 && v.cfg.ModelName != "" {
 		v.drawTextImgBg(x, sy, " "+v.cfg.ModelName, v.theme.ModelFg)
 	}
+}
+
+// drawSharkAnimation 在 (x,sy) 处绘制一帧鲨鱼动画 [■ ■ 🦈 ■ ■]。
+// 方块颜色从左到右渐变蓝，鲨鱼在 frame 指定的位置游动。
+// 返回渲染结束后的下一列 x 坐标。
+func (v *View) drawSharkAnimation(x, sy int) int {
+	frame := v.sharkFrame
+	fg := v.theme.DimFg
+	v.screen.SetCell(x, sy, '[', fg, v.bg.BotColor(x, sy))
+	x += runewidth.RuneWidth('[')
+	for pos := 0; pos < 5; pos++ {
+		if pos == frame {
+			v.screen.SetCell(x, sy, '🦈', style.RGB(0xFF, 0xFF, 0xFF), v.bg.BotColor(x, sy))
+			x += runewidth.RuneWidth('🦈')
+		} else {
+			v.screen.SetCell(x, sy, '▰', SharkGradient[pos], v.bg.BotColor(x, sy))
+			x += runewidth.RuneWidth('▰')
+			v.screen.SetCell(x, sy, ' ', style.Color{}, v.bg.BotColor(x, sy))
+			x++
+		}
+	}
+	v.screen.SetCell(x, sy, ']', fg, v.bg.BotColor(x, sy))
+	return x + runewidth.RuneWidth(']')
 }
 
 // artPad 返回横幅的左侧居中内边距，基于当前屏幕宽度计算。
@@ -413,12 +463,17 @@ func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity flo
 		edgeFg = v.theme.AssistantEdgeFg
 	}
 
+	textFg := v.theme.InputTextFg
+	if line.isReasoning {
+		textFg = v.theme.DimFg
+	}
+
 	v.screen.SetCell(v.bubbleEdgeX(contentX), sy, '▌', edgeFg, bubbleBg(v.bubbleEdgeX(contentX), sy))
 	if opacity <= 0 {
 		if line.kind == kindText {
-			v.drawText(contentX, sy, v.padRight(" "+line.text, bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
+			v.drawText(contentX, sy, v.padRight(" "+line.text, bgW), textFg, v.theme.InputAreaBg)
 		} else {
-			v.drawText(contentX, sy, v.getBgSpaces(bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
+			v.drawText(contentX, sy, v.getBgSpaces(bgW), textFg, v.theme.InputAreaBg)
 		}
 		return
 	}
@@ -430,7 +485,7 @@ func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity flo
 	}
 	cx := contentX
 	for _, ch := range runes {
-		v.screen.SetCell(cx, sy, ch, v.theme.InputTextFg, bubbleBg(cx, sy))
+		v.screen.SetCell(cx, sy, ch, textFg, bubbleBg(cx, sy))
 		cx += runewidth.RuneWidth(ch)
 	}
 }

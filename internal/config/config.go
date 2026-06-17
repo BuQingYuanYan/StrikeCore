@@ -40,15 +40,15 @@ type Config struct {
 
 // fileConfig 是 JSON 可解码子集。颜色为十六进制字符串以便文件保持人工可编辑；未设置的字段回退到默认值。
 type fileConfig struct {
-	Version      *string  `json:"version,omitempty"`
-	ModelName    *string  `json:"model_name,omitempty"`
-	SystemPrompt *string  `json:"system_prompt,omitempty"`
-	Hint         *string  `json:"hint,omitempty"`
-	Brightness   *float64 `json:"brightness,omitempty"`
-	BgPath       *string  `json:"bg_path,omitempty"`
-	BgInterval   *int     `json:"bg_interval,omitempty"` // seconds, 0 = off
-	AsciiArt   []string  `json:"ascii_art,omitempty"`
-	Theme      *fileTheme `json:"theme,omitempty"`
+	Version      *string    `json:"version,omitempty"`
+	ModelName    *string    `json:"model_name,omitempty"`
+	SystemPrompt *string    `json:"system_prompt,omitempty"`
+	Hint         *string    `json:"hint,omitempty"`
+	Brightness   *float64   `json:"brightness,omitempty"`
+	BgPath       *string    `json:"bg_path,omitempty"`
+	BgInterval   *int       `json:"bg_interval,omitempty"` // seconds, 0 = off
+	AsciiArt     []string   `json:"ascii_art,omitempty"`
+	Theme        *fileTheme `json:"theme,omitempty"`
 }
 
 // fileTheme 是 Theme 的 JSON 可解码子集，所有字段均为可选十六进制颜色。
@@ -86,30 +86,49 @@ func DefaultAPI() APIConfig {
 	}
 }
 
-// LoadAPI 从 data/api.json 加载 API 配置，文件不存在时返回默认值。
-// STRIKE_API_KEY 环境变量优先级高于配置文件，便于 CI/CD 安全注入。
+// defaultAPITemplate 在 api.json 不存在时自动写入，方便用户直接编辑。
+const defaultAPITemplate = `{
+    "_说明": "在此填写你的 AI 模型 API 密钥和地址。支持任何 OpenAI 兼容接口。",
+    "api_key": "",
+    "base_url": "https://api.minimax.chat/v1",
+    "model": "MiniMaxAI/MiniMax-M2.5"
+}
+`
+
+// LoadAPI 从 data/api.json 加载 API 配置。
+// - 文件不存在时自动创建模板文件，提示用户填写
+// - STRIKE_API_KEY / STRIKE_API_URL 环境变量优先级高于配置文件
 func LoadAPI(dataDir string) APIConfig {
 	cfg := DefaultAPI()
 	path := filepath.Join(dataDir, "api.json")
+
 	raw, err := os.ReadFile(path)
-	if err == nil {
-		var fc struct {
-			APIKey  *string `json:"api_key,omitempty"`
-			BaseURL *string `json:"base_url,omitempty"`
-			Model   *string `json:"model,omitempty"`
+	if err != nil {
+		// 文件不存在时自动生成模板，方便用户直接编辑
+		if os.IsNotExist(err) {
+			os.WriteFile(path, []byte(defaultAPITemplate), 0644)
 		}
-		if err := json.Unmarshal(raw, &fc); err == nil {
-			if fc.APIKey != nil {
-				cfg.APIKey = *fc.APIKey
-			}
-			if fc.BaseURL != nil {
-				cfg.BaseURL = *fc.BaseURL
-			}
-			if fc.Model != nil {
-				cfg.Model = *fc.Model
-			}
-		}
+		return cfg
 	}
+
+	var fc struct {
+		APIKey  *string `json:"api_key,omitempty"`
+		BaseURL *string `json:"base_url,omitempty"`
+		Model   *string `json:"model,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &fc); err != nil {
+		return cfg
+	}
+	if fc.APIKey != nil {
+		cfg.APIKey = *fc.APIKey
+	}
+	if fc.BaseURL != nil {
+		cfg.BaseURL = *fc.BaseURL
+	}
+	if fc.Model != nil {
+		cfg.Model = *fc.Model
+	}
+
 	if envKey := os.Getenv("STRIKE_API_KEY"); envKey != "" {
 		cfg.APIKey = envKey
 	}
@@ -135,8 +154,8 @@ func Default() Config {
 	}
 	return Config{
 		Version:      version,
-		ModelName:    "MiniMaxAI/MiniMax-M2.5",
-		SystemPrompt: "你是一个名为 StrikeCore 的终端 AI 智能体助手。请用中文回答用户的问题。回答简洁有力。",
+		ModelName:    "",
+		SystemPrompt: "你是一个名为 StrikeCore 的终端 AI 智能体助手。",
 		Hint:         "↑ 输入内容，Ctrl+C 退出",
 		Brightness:   0.35,
 		BgPath:       "",
@@ -150,9 +169,17 @@ func Default() Config {
 	}
 }
 
+// defaultConfigTemplate 在 config.json 不存在时自动生成，方便用户修改提示词等设置。
+const defaultConfigTemplate = `{
+    "_说明": "StrikeCore 主配置文件。修改后重启生效。系统提示词在这里改。",
+    "system_prompt": "你是一个名为 StrikeCore 的终端 AI 智能体助手。"
+}
+`
+
 // Load 读取 JSON 配置文件并将其叠加到 Default() 之上。
 // 当 path 为空时会尝试从 dataDir 下的 config.json 加载。
 // 路径存在但解析失败则返回错误，以便暴露而非忽略配置错误。
+// 文件不存在时自动生成模板。
 func Load(path string, dataDir string) (Config, error) {
 	cfg := Default()
 	if path == "" {
@@ -161,7 +188,8 @@ func Load(path string, dataDir string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, nil // 没有配置文件也正常
+			os.WriteFile(path, []byte(defaultConfigTemplate), 0644)
+			return cfg, nil // 返回默认值，用户编辑模板后重启生效
 		}
 		return cfg, fmt.Errorf("config: read %q: %w", path, err)
 	}

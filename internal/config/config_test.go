@@ -10,7 +10,7 @@ import (
 
 func TestDefault(t *testing.T) {
 	c := Default()
-	if c.Version == "" || c.ModelName == "" {
+	if c.Version == "" {
 		t.Error("default config missing identity fields")
 	}
 	if c.Brightness != 0.35 {

@@ -85,6 +85,14 @@ func parseCSI(b []byte) (int, rune, int) {
 		if len(b) >= 4 && b[3] == '~' {
 			return KeyEnd, 0, 4
 		}
+	case '5':
+		if len(b) >= 4 && b[3] == '~' {
+			return KeyPgUp, 0, 4
+		}
+	case '6':
+		if len(b) >= 4 && b[3] == '~' {
+			return KeyPgDown, 0, 4
+		}
 	}
 	return KeyEscape, 0, 1
 }
@@ -126,7 +134,7 @@ func parseSGRMouse(b []byte) (int, rune, int) {
 			}
 		}
 		if b[i] == 'm' {
-			return KeyNone, 0, i+1
+			return KeyNone, 0, i + 1
 		}
 	}
 	// 终结符尚未到达：等待更多字节。

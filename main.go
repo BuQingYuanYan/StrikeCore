@@ -29,6 +29,11 @@ func main() {
 
 	apiCfg := config.LoadAPI(dataDir)
 
+	// 将 api.json 中的模型名同步到配置，使 UI 显示和 API 调用使用同一模型
+	if apiCfg.Model != "" {
+		cfg.ModelName = apiCfg.Model
+	}
+
 	var provider llm.Provider
 	if apiCfg.APIKey != "" {
 		provider = llm.NewOpenAIProvider(llm.OpenAIConfig{
