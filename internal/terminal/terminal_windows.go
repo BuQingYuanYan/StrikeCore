@@ -78,9 +78,12 @@ type MouseEventRecord struct {
 	EventFlags      uint32
 }
 
-// 鼠标事件标志位与按键状态。
+// 鼠标事件标志位（dwEventFlags）与按键状态（dwButtonState）。
 const (
+	MouseMoved   = 0x0001 // dwEventFlags：鼠标移动
 	MouseWheeled = 0x0004 // dwEventFlags：垂直滚轮事件
+
+	FromLeft1stButtonPressed = 0x0001 // dwButtonState：左键
 )
 
 // InputRecord 映射 Windows INPUT_RECORD 结构体（EventType + 联合体）。
@@ -94,6 +97,11 @@ type InputRecord struct {
 // EventType == MouseEvent 时调用方可信赖其内容。
 func (r *InputRecord) AsMouseEvent() MouseEventRecord {
 	return *(*MouseEventRecord)(unsafe.Pointer(&r.KeyEvent))
+}
+
+// Pos 返回鼠标的 0-based 单元格坐标（coord 字段未导出，供其它包读取）。
+func (m MouseEventRecord) Pos() (x, y int) {
+	return int(m.MousePosition.x), int(m.MousePosition.y)
 }
 
 // dwControlKeyState 标志位。
@@ -185,6 +193,22 @@ func (t *windowsTerminal) Init() (func(), error) {
 		}
 	}
 	return restore, nil
+}
+
+// WindowOrigin 返回可视窗口在控制台屏幕缓冲区中的左上角原点（left, top）。
+// 鼠标事件上报的是缓冲区坐标，需减去此原点才能换算成可视区行列。
+// 读取失败时返回 (0,0)。
+func (t *windowsTerminal) WindowOrigin() (left, top int) {
+	fd := t.outFd
+	if t.hasConout {
+		fd = t.conout
+	}
+	var csbi consoleScreenBufferInfo
+	r, _, _ := procGetConsoleScreenBuffer.Call(uintptr(fd), uintptr(unsafe.Pointer(&csbi)))
+	if r == 0 {
+		return 0, 0
+	}
+	return int(csbi.window.left), int(csbi.window.top)
 }
 
 func (t *windowsTerminal) Size() (int, int, error) {

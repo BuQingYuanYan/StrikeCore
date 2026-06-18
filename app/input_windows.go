@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"syscall"
 	"unicode/utf8"
 	"unsafe"
@@ -69,7 +70,14 @@ func readInput(ctx context.Context, term terminal.Terminal, inputCh chan<- []byt
 	}
 	h := hp.ConsoleInputHandle()
 
+	// 鼠标坐标需减去窗口原点转为可视区坐标
+	type originProvider interface {
+		WindowOrigin() (left, top int)
+	}
+	op, _ := term.(originProvider)
+
 	var rec terminal.InputRecord
+	var leftDown bool // 跨事件追踪左键是否按住，用于区分拖拽与普通移动
 	for {
 		select {
 		case <-ctx.Done():
@@ -118,25 +126,60 @@ func readInput(ctx context.Context, term terminal.Terminal, inputCh chan<- []byt
 
 		case terminal.MouseEvent:
 			me := rec.AsMouseEvent()
-			if me.EventFlags&terminal.MouseWheeled == 0 {
-				continue // 只关心垂直滚轮
+			// Windows Terminal 走原生 ReadConsoleInput 而非 VT 鼠标协议，
+			// ?1002h 在此不生效，需自行把按下/拖拽/释放/滚轮合成 SGR 序列
+			// （\x1b[<Cb;Cx;Cy(M|m)），交给跨平台的 input.ParseSGRMouse 解析。
+			ox, oy := 0, 0
+			if op != nil {
+				ox, oy = op.WindowOrigin()
 			}
-			// 滚轮增量在 ButtonState 的高 16 位，按有符号处理：
-			// 正=向上滚，负=向下滚。转成解析器识别的 SGR 字节序列。
-			delta := int16(me.ButtonState >> 16)
-			var seq []byte
-			if delta > 0 {
-				seq = []byte("\x1b[<64;1;1M")
-			} else {
-				seq = []byte("\x1b[<65;1;1M")
-			}
-			select {
-			case inputCh <- seq:
-			case <-ctx.Done():
-				return
+			if seq := mouseEventToSGR(me, &leftDown, ox, oy); seq != nil {
+				select {
+				case inputCh <- seq:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}
+}
+
+// mouseEventToSGR 把 Windows MOUSE_EVENT_RECORD 合成为 SGR 序列 \x1b[<Cb;Cx;Cy(M|m)。
+// leftDown 追踪左键；originX/originY 将缓冲区坐标转为可视区坐标。
+// 实测 alt-screen 下 origin=0，但 px 比屏幕列少 1、py 比屏幕行多 1，故校准：cx+2, cy 不加 1。
+func mouseEventToSGR(me terminal.MouseEventRecord, leftDown *bool, originX, originY int) []byte {
+	px, py := me.Pos()
+	cx := px - originX + 2 // alt-screen 下 px 比 VT 屏幕列少 1，+2 即等效 +1 校准
+	cy := py - originY     // alt-screen 下 py 比 VT 屏幕行多 1，省去 +1 即等效 -1 校准
+
+	// 滚轮：增量在 ButtonState 高 16 位，正=上、负=下。
+	if me.EventFlags&terminal.MouseWheeled != 0 {
+		if int16(me.ButtonState>>16) > 0 {
+			return []byte("\x1b[<64;1;1M")
+		}
+		return []byte("\x1b[<65;1;1M")
+	}
+
+	left := me.ButtonState&terminal.FromLeft1stButtonPressed != 0
+
+	if me.EventFlags&terminal.MouseMoved != 0 {
+		// 移动事件：仅在左键按住时作为拖拽上报（Cb=32）。
+		if left && *leftDown {
+			return fmt.Appendf(nil, "\x1b[<32;%d;%dM", cx, cy)
+		}
+		return nil
+	}
+
+	// 非移动、非滚轮：按键状态变化（按下或释放）。
+	if left && !*leftDown {
+		*leftDown = true
+		return fmt.Appendf(nil, "\x1b[<0;%d;%dM", cx, cy)
+	}
+	if !left && *leftDown {
+		*leftDown = false
+		return fmt.Appendf(nil, "\x1b[<0;%d;%dm", cx, cy)
+	}
+	return nil
 }
 
 // readInputFallback 是当 ReadConsoleInput 不可用（标准输入是管道或重定向文件）时使用的通用字节读取器。

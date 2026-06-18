@@ -22,4 +22,5 @@ const (
 	KeyRune
 	KeyScrollUp   // 鼠标滚轮向上
 	KeyScrollDown // 鼠标滚轮向下
+	KeyMouse      // 鼠标点击/拖拽/释放（坐标由 ParseSGRMouse 取得）
 )

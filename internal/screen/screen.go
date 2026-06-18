@@ -86,6 +86,20 @@ func (s *Screen) SetCell(x, y int, ch rune, fg, bg style.Color) {
 	}
 }
 
+// SetCellWide 强制将 ch 当作双格宽字符写入：占据 (x,y) 与右侧一格，
+// 右半格标记为延续单元（Flush 时跳过，由终端绘制该字形的右半部分）。
+// 用于宽度有歧义（East Asian Ambiguous）的字符——某些终端按 2 格渲染，
+// 此时必须按 2 格记账，否则字形右半会溢出并覆盖相邻单元的颜色。
+func (s *Screen) SetCellWide(x, y int, ch rune, fg, bg style.Color) {
+	if x < 0 || x >= s.cols || y < 0 || y >= s.rows {
+		return
+	}
+	s.cells[y*s.cols+x] = Cell{Ch: ch, Fg: fg, Bg: bg, W: 2}
+	if x+1 < s.cols {
+		s.cells[y*s.cols+x+1] = Cell{Ch: ch, W: -1}
+	}
+}
+
 func (s *Screen) writeInt(n int) {
 	i := len(s.intBuf)
 	for {

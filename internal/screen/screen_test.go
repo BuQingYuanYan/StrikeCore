@@ -103,3 +103,33 @@ func TestSetCellWideRune(t *testing.T) {
 		t.Errorf("right-half marker width = %d, want -1", s.cells[1].W)
 	}
 }
+
+func TestSetCellWideForcesTwoCells(t *testing.T) {
+	s := New(&bytes.Buffer{})
+	s.Realloc(4, 1)
+	s.Clear()
+	fg := style.RGB(1, 2, 3)
+	// ▰ 在 EastAsianWidth=false 下 RuneWidth 返回 1；SetCellWide 必须无视它，
+	// 强制按 2 格占位，使右半成为延续单元、不溢出覆盖相邻格。
+	s.SetCellWide(0, 0, '▰', fg, style.Color{})
+	if s.cells[0].W != 2 {
+		t.Errorf("forced-wide cell width = %d, want 2", s.cells[0].W)
+	}
+	if s.cells[0].Fg != fg {
+		t.Errorf("forced-wide cell fg = %+v, want %+v", s.cells[0].Fg, fg)
+	}
+	if s.cells[1].W != -1 {
+		t.Errorf("right-half marker width = %d, want -1", s.cells[1].W)
+	}
+}
+
+func TestSetCellWideClipsAtRightEdge(t *testing.T) {
+	s := New(&bytes.Buffer{})
+	s.Realloc(2, 1)
+	s.Clear()
+	// 写在最后一列：不应越界 panic，主单元仍记为宽。
+	s.SetCellWide(1, 0, '▰', style.RGB(9, 9, 9), style.Color{})
+	if s.cells[1].W != 2 {
+		t.Errorf("edge cell width = %d, want 2", s.cells[1].W)
+	}
+}

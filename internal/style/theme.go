@@ -1,7 +1,6 @@
 package style
 
-// Theme 持有 UI 绘制时使用的所有颜色。它取代了原来位于 main.go 中的
-// 包级颜色变量。使用 DefaultTheme() 构建或在 config 中派生。
+// Theme 持有 UI 使用的所有颜色。使用 DefaultTheme() 或从 config 派生。
 type Theme struct {
 	ArtLeft         Color
 	ArtRight        Color
@@ -11,17 +10,18 @@ type Theme struct {
 	PromptBg        Color
 	BlockEdgeFg     Color
 	BlockEdgeBg     Color
-	UserEdgeFg      Color // 用户消息气泡边条（▌）颜色
-	AssistantEdgeFg Color // 助手消息气泡边条（▌）颜色
+	UserEdgeFg      Color
+	AssistantEdgeFg Color
 	SepFg           Color
 	DimFg           Color
 	PlaceholderFg   Color
 	HintFg          Color
 	ModelFg         Color
 	LogoDepthBg     Color
+	SelectionBg     Color // 鼠标自绘选区高亮
 }
 
-// DefaultTheme 重现 main.go 中原始的硬编码调色板。
+// DefaultTheme 返回硬编码调色板。
 func DefaultTheme() Theme {
 	inputBg := RGB(0x1A, 0x1A, 0x1A)
 	return Theme{
@@ -33,13 +33,14 @@ func DefaultTheme() Theme {
 		PromptBg:        inputBg,
 		BlockEdgeFg:     RGB(0x00, 0x78, 0xD4),
 		BlockEdgeBg:     inputBg,
-		UserEdgeFg:      RGB(0x60, 0xCD, 0xFF), // 蓝 —— 用户
-		AssistantEdgeFg: RGB(0x4E, 0xC9, 0x7A), // 绿 —— 助手
+		UserEdgeFg:      RGB(0x60, 0xCD, 0xFF),
+		AssistantEdgeFg: RGB(0x4E, 0xC9, 0x7A),
 		SepFg:           RGB(0x88, 0x88, 0x88),
 		DimFg:           RGB(0xA8, 0xA8, 0xA8),
 		PlaceholderFg:   RGB(0x98, 0x98, 0x98),
 		HintFg:          RGB(0xC8, 0xA0, 0x60),
 		ModelFg:         RGB(0xE0, 0xE0, 0xE0),
 		LogoDepthBg:     RGB(0x2A, 0x3A, 0x5C),
+		SelectionBg:     RGB(0x33, 0x55, 0x99),
 	}
 }

@@ -11,9 +11,8 @@ import (
 	"strike-core/internal/style"
 )
 
-// View 拥有渲染一帧所需的一切：单元格缓冲区、主题、背景、横幅数据、消息和配置。
-// 所有之前的包级绘图函数现在都是方法，所有之前的全局缓存现在都是字段，
-// 因此 View 是自包含的，没有共享的可变状态。
+// View 拥有渲染一帧所需的一切：单元格缓冲区、主题、背景、消息、配置。
+// 自包含，无共享可变状态。
 type View struct {
 	screen *screen.Screen
 	theme  style.Theme
@@ -27,11 +26,16 @@ type View struct {
 	msgScroll       int
 	bubbleBgOpacity float64 // 0=纯色不透明, 1=完全透明（透出背景图）
 	quitPending     bool    // 第一次 Ctrl+C 等待确认退出
+	aborted         bool    // AI 回复刚被取消，输入栏占位显示「已终止AI答复」，几秒后或按键时清除
 	flashMsg        string  // 一次性提示，显示在输入栏占位处，有按键输入时清除
 
 	// 鲨鱼游泳动画状态
 	sharkFrame  int  // 当前帧 0~5
 	sharkActive bool // true = 回复中显示动画, false = 显示 [StrikeCore]
+
+	// 鼠标选区 + 上一帧可选行表（会话流 + 输入框），每帧清空复用
+	sel             Selection
+	selectableLines []selectableLine
 
 	// 按尺寸缓存的字符串
 	borderCacheW int
@@ -54,7 +58,7 @@ var SharkGradient = [5]style.Color{
 	style.RGB(0x33, 0xBB, 0xFF), // 最浅
 }
 
-// SetSharkFrame 设置当前鲨鱼动画帧（0~4），对应 5 个游动位置。
+// SetSharkFrame 设置当前鲨鱼动画帧（0~4）。
 func (v *View) SetSharkFrame(n int) {
 	v.sharkFrame = n % 5
 }
@@ -63,9 +67,25 @@ func (v *View) SetSharkFrame(n int) {
 func (v *View) SharkFrame() int {
 	return v.sharkFrame
 }
-// SetSharkActive 控制是否显示鲨鱼动画（true=回复中，false=显示[StrikeCore]）。
+
+// SetSharkActive 控制鲨鱼动画（true=回复中，false=[StrikeCore]）。
 func (v *View) SetSharkActive(active bool) {
 	v.sharkActive = active
+}
+
+// SetSelection 设置当前鼠标选区，下次 Render 时据此叠加高亮。
+func (v *View) SetSelection(sel Selection) {
+	v.sel = sel
+}
+
+// HitTest 把屏幕坐标 (sx,sy) 反映射到 SelPos。会话流 + 输入框文本行皆可命中。
+func (v *View) HitTest(sx, sy int) (SelPos, bool) {
+	return hitLine(v.selectableLines, sx, sy)
+}
+
+// SelectedText 基于上一帧登记的可选行表与当前选区抽取文本。
+func (v *View) SelectedText() string {
+	return SelectedTextFromLines(v.selectableLines, v.sel)
 }
 
 // NewView 从依赖项构建一个 View。
@@ -89,12 +109,17 @@ func (v *View) SetBubbleBgOpacity(opacity float64) {
 	v.bubbleBgOpacity = opacity
 }
 
-// SetQuitPending 设置是否处于待退出状态（第一次 Ctrl+C 后等待确认）。
+// SetQuitPending 设置待退出状态（第一次 Ctrl+C 后）。
 func (v *View) SetQuitPending(pending bool) {
 	v.quitPending = pending
 }
 
-// Flash 显示一条一次性提示在输入栏占位处，下次按键时自动清除。
+// SetAborted 设置 AI 回复是否刚被取消（输入栏显示「已终止AI答复」）。
+func (v *View) SetAborted(aborted bool) {
+	v.aborted = aborted
+}
+
+// Flash 显示一次性提示在输入栏占位处，按键自动清除。
 func (v *View) Flash(msg string) {
 	v.flashMsg = msg
 }
@@ -110,8 +135,7 @@ func (v *View) SetMessages(msgs []Message, scroll int) {
 	v.msgScroll = scroll
 }
 
-// Render 在给定编辑器状态下为终端尺寸 w×h 绘制完整帧，
-// 并返回光标应处的位置。它不会刷新屏幕。
+// Render 为终端尺寸 w×h 绘制完整帧，返回光标位置。不刷新屏幕。
 func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 	v.bg.ensure(w, h)
 	if v.bg.topColors != nil {
@@ -119,6 +143,9 @@ func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 	} else {
 		v.screen.Clear()
 	}
+
+	// 每帧重建可选行表；drawScrollContent / drawInput 会向其登记可选文本行。
+	v.selectableLines = v.selectableLines[:0]
 
 	inner := w - 2
 	if inner < 1 {
@@ -145,8 +172,7 @@ func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 	return v.drawInput(e, ly)
 }
 
-// ScrollOffset 返回上一次 Render 钳制后的滚动偏移，供事件循环写回，
-// 使“滚动到底部”（传入极大值）后再上滚能从真实底部开始。
+// ScrollOffset 返回上一次 Render 钳制后的滚动偏移，供事件循环写回，使「到底后上滚」从真实底部开始。
 func (v *View) ScrollOffset() int { return v.msgScroll }
 
 func (v *View) drawBgImage(w, h int) {
@@ -306,8 +332,7 @@ func (v *View) drawArt(ly Layout) {
 	}
 }
 
-// drawArtRowAt 在屏幕行 sy 处绘制第 i 行艺术字（含模型名后缀），
-// 横向位置沿用 ArtPad。供居中布局和滚动流共用。
+// drawArtRowAt 在屏幕行 sy 处绘制横幅第 i 行（含模型名后缀）。供居中布局和滚动流共用。
 func (v *View) drawArtRowAt(i, sy int) {
 	if i < 0 || i >= len(v.art.texts) {
 		return
@@ -325,9 +350,7 @@ func (v *View) drawArtRowAt(i, sy int) {
 	}
 }
 
-// drawSharkAnimation 在 (x,sy) 处绘制一帧鲨鱼动画 [■ ■ 🦈 ■ ■]。
-// 方块颜色从左到右渐变蓝，鲨鱼在 frame 指定的位置游动。
-// 返回渲染结束后的下一列 x 坐标。
+// drawSharkAnimation 在 (x,sy) 处绘制鲨鱼动画 [■ ■ 🦈 ■ ■]，frame 指定位置。
 func (v *View) drawSharkAnimation(x, sy int) int {
 	frame := v.sharkFrame
 	fg := v.theme.DimFg
@@ -441,14 +464,25 @@ func (v *View) drawScrollContent(ly Layout, bubbleLines []msgLine) {
 		case streamArt:
 			v.drawArtRowAt(line.artRow, sy)
 		case streamBubble:
-			v.drawBubbleLineAt(line.bubble, sy, contentX, bgW, opacity)
+			// 登记可选会话流文本行：lineID=流下标 idx（远小于 inputLineBase，恒排在
+			// 输入框行之前）；文本经 padRight(" "+text) 有前缀空格，真实文本 1-based
+			// 屏幕起列 = contentX+2（contentX 为 0-based 内容列）。
+			if line.bubble.kind == kindText {
+				v.selectableLines = append(v.selectableLines, selectableLine{
+					lineID: idx,
+					sy:     sy,
+					x0:     contentX + 2,
+					text:   line.bubble.text,
+				})
+			}
+			v.drawBubbleLineAt(line.bubble, idx, sy, contentX, bgW, opacity)
 		}
 	}
 }
 
-// drawBubbleLineAt 在屏幕行 sy 处绘制一条气泡行（填充行或文本行）：
-// 在 EdgeX 处画块边（▌），并铺背景条。间隙行透出背景图，不绘制。
-func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity float64) {
+// drawBubbleLineAt 在屏幕行 sy 处绘制气泡行（块边 ▌ + 背景），间隙行透出背景图。
+// idx 是该行流下标（= 会话流行的 lineID），用于选区高亮。
+func (v *View) drawBubbleLineAt(line msgLine, idx, sy, contentX, bgW int, opacity float64) {
 	if line.kind == kindGap {
 		return
 	}
@@ -468,15 +502,20 @@ func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity flo
 		textFg = v.theme.DimFg
 	}
 
-	v.screen.SetCell(v.bubbleEdgeX(contentX), sy, '▌', edgeFg, bubbleBg(v.bubbleEdgeX(contentX), sy))
-	if opacity <= 0 {
-		if line.kind == kindText {
-			v.drawText(contentX, sy, v.padRight(" "+line.text, bgW), textFg, v.theme.InputAreaBg)
-		} else {
-			v.drawText(contentX, sy, v.getBgSpaces(bgW), textFg, v.theme.InputAreaBg)
+	// 选区高亮：把 rune 列区间转成相对文本起列(contentX+1)的显示单元格区间。
+	// 仅文本行可选；填充行不高亮。
+	selXStart, selXEnd := 0, 0
+	if line.kind == kindText {
+		if c0, c1, ok := spanForLine(v.sel, idx, len([]rune(line.text))); ok {
+			xs, xe := cellSpanForCols(line.text, c0, c1)
+			tx0 := contentX + 1 // " "+text 的前缀空白占一格
+			selXStart, selXEnd = tx0+xs, tx0+xe
 		}
-		return
 	}
+	inSel := func(x int) bool { return x >= selXStart && x < selXEnd }
+
+	v.screen.SetCell(v.bubbleEdgeX(contentX), sy, '▌', edgeFg, bubbleBg(v.bubbleEdgeX(contentX), sy))
+
 	var runes []rune
 	if line.kind == kindText {
 		runes = []rune(v.padRight(" "+line.text, bgW))
@@ -485,7 +524,11 @@ func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity flo
 	}
 	cx := contentX
 	for _, ch := range runes {
-		v.screen.SetCell(cx, sy, ch, textFg, bubbleBg(cx, sy))
+		bg := bubbleBg(cx, sy)
+		if inSel(cx) {
+			bg = v.theme.SelectionBg
+		}
+		v.screen.SetCell(cx, sy, ch, textFg, bg)
 		cx += runewidth.RuneWidth(ch)
 	}
 }
@@ -493,8 +536,29 @@ func (v *View) drawBubbleLineAt(line msgLine, sy, contentX, bgW int, opacity flo
 // bubbleEdgeX 返回块边（▌）所在列：内容列减 1。
 func (v *View) bubbleEdgeX(contentX int) int { return contentX - 1 }
 
-// drawInput 渲染编辑器输入区域并返回光标位置。
-// 滚动计算委托给编辑器；此方法仅输出单元格。
+// drawInputTextLine 在屏幕行 sy、起列 x 处绘制输入框文本行（含背景填充 + 选区高亮）。
+// lineID = inputLineBase+li，用于查选区列区间。
+func (v *View) drawInputTextLine(x, sy int, text string, lineID, bgW int) {
+	selXStart, selXEnd := 0, 0
+	if c0, c1, ok := spanForLine(v.sel, lineID, len([]rune(text))); ok {
+		xs, xe := cellSpanForCols(text, c0, c1)
+		selXStart, selXEnd = x+xs, x+xe
+	}
+	inSel := func(cx int) bool { return cx >= selXStart && cx < selXEnd }
+
+	runes := []rune(v.padRight(text, bgW))
+	cx := x
+	for _, ch := range runes {
+		bg := v.theme.InputAreaBg
+		if inSel(cx) {
+			bg = v.theme.SelectionBg
+		}
+		v.screen.SetCell(cx, sy, ch, v.theme.InputTextFg, bg)
+		cx += runewidth.RuneWidth(ch)
+	}
+}
+
+// drawInput 渲染编辑器输入区域并返回光标位置。滚动委托给编辑器，此方法仅输出单元格。
 func (v *View) drawInput(e *editor.Editor, ly Layout) style.Cursor {
 	wrapW := ly.TextW - 1 // 文字换行宽度，留 1 格边距
 	bgW := ly.TextW       // 背景填满整个输入区
@@ -526,13 +590,25 @@ func (v *View) drawInput(e *editor.Editor, ly Layout) style.Cursor {
 				placeholder := InputPlaceholder
 				if v.flashMsg != "" {
 					placeholder = v.flashMsg
+				} else if v.aborted {
+					placeholder = "已终止AI答复"
 				} else if v.quitPending {
 					placeholder = "再按一次退出"
 				}
 				v.drawText(x, sy, v.padRight(placeholder, bgW), v.theme.PlaceholderFg, v.theme.InputAreaBg)
 			} else {
 				text := editor.CharsToString(e.Slice(starts[li], end))
-				v.drawText(x, sy, v.padRight(text, bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
+				// 登记可选输入框文本行：lineID=inputLineBase+li（恒大于会话流行下标，
+				// 故排在会话流之后）。x 是 0-based 屏幕绘制列，对应 1-based 文本起列 x+1；
+				// HitTest 的 sx 为 1-based，故 x0=x+1 才使命中与字符精确对齐。
+				lineID := inputLineBase + li
+				v.selectableLines = append(v.selectableLines, selectableLine{
+					lineID: lineID,
+					sy:     sy,
+					x0:     x + 1,
+					text:   text,
+				})
+				v.drawInputTextLine(x, sy, text, lineID, bgW)
 			}
 		} else {
 			v.drawText(x, sy, v.getBgSpaces(bgW), v.theme.InputTextFg, v.theme.InputAreaBg)
