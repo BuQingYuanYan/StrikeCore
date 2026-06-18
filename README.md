@@ -363,11 +363,11 @@ make lint        # go vet + gofmt 检查
 
 ## 许可
 
-[MIT](LICENSE)
+[GNU General Public License v3](LICENSE)
 
 ---
 
 <p align="center">
   <sub>StrikeCore · 终端里的 AI 智能体</sub><br>
-  <sub><a href="https://github.com/anomalyco/opencode">OpenCode</a> · <a href="https://openshark.dev">OpenShark</a></sub>
+  <sub>StrikeCore is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.</sub>
 </p>
