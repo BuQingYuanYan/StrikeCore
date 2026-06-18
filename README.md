@@ -20,6 +20,10 @@ StrikeCore 是一个运行在终端中的 AI 智能体，提供沉浸式全屏 T
 
 > 你看到的不是一个聊天网页，而是一个**有生命的终端智能体**。
 
+<p align="center">
+  <img src="screenshot.png" alt="StrikeCore 界面预览" width="100%" style="border-radius: 8px;">
+</p>
+
 ---
 
 ## 目录
