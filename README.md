@@ -331,11 +331,3 @@ make lint        # go vet + gofmt
   <sub>StrikeCore · 一头游弋在终端里的鲨鱼</sub><br>
   <sub>StrikeCore is free software: you can redistribute it and/or modify it under the terms of the GPLv3.</sub>
 </p>
-
-<p align="center">
-  <sub>
-  █▀▀▀ ▀█▀ █▀▀▄ ▀█▀ █ ▄▀ █▀▀▀  █▀▀▀ █▀▀█ █▀▀▄ █▀▀▀<br>
-  ▀▀▀█  █  █▀█   █  █▀▄  █▀▀   █    █  █ █▀█  ▀▀▀█<br>
-  ▀▀▀▀  ▀  ▀  ▀ ▀▀▀ ▀  ▀ ▀▀▀▀  ▀▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀
-  </sub>
-</p>
