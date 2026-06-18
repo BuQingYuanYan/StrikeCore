@@ -81,8 +81,8 @@ type APIConfig struct {
 // DefaultAPI 返回默认的 API 配置。
 func DefaultAPI() APIConfig {
 	return APIConfig{
-		BaseURL: "https://api.minimax.chat/v1",
-		Model:   "MiniMaxAI/MiniMax-M2.5",
+		BaseURL: "https://api.example.com/v1",
+		Model:   "your-model-name",
 	}
 }
 
@@ -90,8 +90,8 @@ func DefaultAPI() APIConfig {
 const defaultAPITemplate = `{
     "_说明": "在此填写你的 AI 模型 API 密钥和地址。支持任何 OpenAI 兼容接口。",
     "api_key": "",
-    "base_url": "https://api.minimax.chat/v1",
-    "model": "MiniMaxAI/MiniMax-M2.5"
+    "base_url": "https://api.example.com/v1",
+    "model": "your-model-name"
 }
 `
 

@@ -9,7 +9,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white" alt="Go version">
-  <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
+  <img src="https://img.shields.io/badge/License-GPLv3-blue" alt="License">
   <img src="https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Active-brightgreen" alt="Status">
 </p>
@@ -43,8 +43,8 @@ StrikeCore 是一个运行在终端中的 AI 智能体，提供沉浸式全屏 T
 
 | 特性 | 说明 |
 |------|------|
-| **AI 对话** | 接入 OpenAI 兼容 API（SiliconFlow、MiniMax、DeepSeek 等），流式逐字输出 |
-| **思考过程可见** | 支持 `reasoning_content`（如 DeepSeek-R1），以暗色独立渲染 |
+| **AI 对话** | 接入 OpenAI 兼容 API，流式逐字输出 |
+| **思考过程可见** | 支持 `reasoning_content`，以暗色独立渲染 |
 | **打字机特效** | 100ms 刻度的智能缓冲输出，UI 永远追得上模型，同时保留逐字动画手感 |
 | **随时取消回复** | `Ctrl+C` 或双击 `ESC` 中断回复，已生成内容保留并标记「⏹ 已终止」 |
 | **上下文感知** | 完整的对话历史管理，支持中断续接、会话恢复 |
@@ -108,8 +108,8 @@ go run . -config my.json  # 加载外部配置文件
 ```json
 {
   "api_key": "your-api-key",
-  "base_url": "https://api.siliconflow.cn/v1",
-  "model": "deepseek-ai/DeepSeek-R1"
+  "base_url": "https://api.example.com/v1",
+  "model": "your-model-name"
 }
 ```
 
@@ -251,7 +251,7 @@ AI 回复中也**可双击 `ESC`** 取消，与 `Ctrl+C` 等效。
 
 ```json
 {
-  "model_name": "MiniMaxAI/MiniMax-M2.5",
+  "model_name": "your-model-name",
   "hint": "↑ 输入内容，Ctrl+C 退出",
   "brightness": 0.35,
   "bg_path": "/path/to/custom.png",
@@ -284,8 +284,8 @@ AI 回复中也**可双击 `ESC`** 取消，与 `Ctrl+C` 等效。
 ```json
 {
   "api_key": "your-api-key",
-  "base_url": "https://api.siliconflow.cn/v1",
-  "model": "deepseek-ai/DeepSeek-R1"
+  "base_url": "https://api.example.com/v1",
+  "model": "your-model-name"
 }
 ```
 
