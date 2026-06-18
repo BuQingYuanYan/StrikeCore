@@ -2,96 +2,62 @@
   <img src="logo.png" alt="StrikeCore" width="480" style="border-radius: 12px;">
 </p>
 
-<h3 align="center">StrikeCore</h3>
-<p align="center">
-  <strong>终端原生 AI 智能体 · 沉浸式 TUI 交互</strong>
-</p>
-
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white" alt="Go version">
   <img src="https://img.shields.io/badge/License-GPLv3-blue" alt="License">
   <img src="https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Active-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/Build-Passing-success?logo=githubactions&logoColor=white" alt="Build">
+  <img src="https://img.shields.io/badge/Runtime-Zero%20Dependencies-orange" alt="Dependencies">
 </p>
 
----
+<hr>
 
-StrikeCore 是一个运行在终端中的 AI 智能体，提供沉浸式全屏 TUI 交互体验。它不是一个聊天网页的终端克隆，而是一个**为终端原生设计的 AI 交互环境**——从像素级渲染到事件循环，全部自研。
+<div align="center">
+  <strong>StrikeCore</strong> · 终端原生 AI 智能体<br>
+  <sub>不依赖 ncurses、不套 WebView、不妥协性能</sub>
+</div>
 
-> 你面对的，不是一个对话框——而是一头游弋在终端里的鲨鱼。
+<hr>
 
 <p align="center">
-  <img src="screenshot.png" alt="StrikeCore 界面预览" width="100%" style="border-radius: 8px;">
+  <img src="screenshot.png" alt="StrikeCore 界面预览" width="100%" style="border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.3);">
 </p>
 
 ---
 
-## 目录
+## 🔥 为什么是 StrikeCore？
 
-- [功能特性](#功能特性)
-- [快速开始](#快速开始)
-- [快捷键](#快捷键)
-- [鼠标操作](#鼠标操作)
-- [架构概览](#架构概览)
-- [项目结构](#项目结构)
-- [配置说明](#配置说明)
-- [跨平台支持](#跨平台支持)
-- [测试](#测试)
-- [许可](#许可)
+现有的终端 AI 方案无非三条路：
+
+| 路线 | 问题 |
+|------|------|
+| **ChatGPT Web 套壳** | 浏览器吃内存、操作割裂、快捷键失灵 |
+| **VS Code 插件** | 被编辑器绑架，换 IDE 就得重学 |
+| **裸 API + curl** | 没有流式输出、没有上下文管理、没有交互 |
+
+**StrikeCore 走了第四条路**——一个从零自建的终端原生 TUI：
+- 像素级渲染引擎，不依赖任何第三方 TUI 框架
+- 双缓冲差异刷新，终端 I/O 做到最低
+- 单二进制分发，零运行时依赖
+- 原生鼠标协议解析，自绘选区 + OSC52 剪贴板
 
 ---
 
-## 功能特性
-
-### 核心体验
-
-| 特性 | 说明 |
-|------|------|
-| **AI 对话** | 接入 OpenAI 兼容 API，流式逐字输出 |
-| **思考过程可见** | 支持 `reasoning_content`，以暗色独立渲染 |
-| **打字机特效** | 100ms 刻度的智能缓冲输出，UI 永远追得上模型，同时保留逐字动画手感 |
-| **随时取消回复** | `Ctrl+C` 或双击 `ESC` 中断回复，已生成内容保留并标记「⏹ 已终止」 |
-| **上下文感知** | 完整的对话历史管理，支持中断续接、会话恢复 |
-
-### 视觉与交互
-
-| 特性 | 说明 |
-|------|------|
-| **鲨鱼游泳动画** | 回复时底部显示 `[▰ ▰ 🦈 ▰ ▰]` 动画，表示等待/生成中 |
-| **背景图轮播** | 支持目录幻灯片，定时切换壁纸，可独立调节亮度与透明度 |
-| **ASCII 横幅** | 可配置的艺术字 logo，与消息流合并滚动 |
-| **真彩色渲染** | 基于 VT 转义序列的双缓冲差异刷新引擎，零闪烁 |
-| **智能换行编辑** | CJK 宽字符感知的文本输入，支持光标导航与滚动 |
-| **鼠标操作** | 滚轮滚动、自绘高亮选中、OSC52 剪贴板复制 |
-
-### 底层能力
-
-| 特性 | 说明 |
-|------|------|
-| **自研渲染引擎** | 不依赖 ncurses、termbox 等第三方 TUI 库 |
-| **双缓冲差异刷新** | 仅输出变化单元格，最大限度减少终端 I/O |
-| **跨平台后端** | Windows 原生 kernel32 / Unix termios，统一接口抽象 |
-| **单二进制分发** | 零运行时依赖，一个可执行文件即完整工具链 |
-
----
-
-## 快速开始
-
-### 环境要求
-
-- Go 1.26+
-- 支持真彩色与 VT 转义序列的终端：
-  - **Windows**: Windows Terminal（推荐）、PowerShell 7+
-  - **macOS**: iTerm2、Kitty、Alacritty
-  - **Linux**: GNOME Terminal、Konsole、Kitty、Alacritty
-
-### 安装与运行
+## ⚡ 三秒上手
 
 ```bash
-# 直接运行（无需编译——Go 自动处理）
+# 只需要 Go 1.26+
+git clone https://github.com/BuQingYuanYan/StrikeCore.git
+cd StrikeCore
 go run .
+```
 
-# 或通过 Makefile
+就是这么简单。不需要 npm install、不需要 Python 环境、不需要 Docker。一个命令，一条鲨鱼。
+
+### 或者用 Makefile
+
+```bash
 make build      # 编译为二进制
 make run        # go run .
 make build-all  # 交叉编译全平台到 dist/
@@ -100,188 +66,192 @@ make build-all  # 交叉编译全平台到 dist/
 ### 命令行选项
 
 ```bash
-go run .                  # 默认模式
-go run . -version         # 打印版本号后退出
-go run . -config my.json  # 加载外部配置文件
-```
-
-### 配置 API
-
-首次运行前编辑 `data/api.json`：
-
-```json
-{
-  "api_key": "your-api-key",
-  "base_url": "https://api.example.com/v1",
-  "model": "your-model-name"
-}
+go run .                   # 默认模式
+go run . -version          # 打印版本号后退出
+go run . -config my.json   # 加载外部配置
 ```
 
 ---
 
-## 快捷键
+## 🎯 功能矩阵
 
-### AI 回复进行中
+### 🧠 核心引擎
+
+| 特性 | 说明 | 技术亮点 |
+|------|------|---------|
+| 🤖 **AI 对话** | 接入任何 OpenAI 兼容 API | 流式 SSE 解析，逐字打字机输出 |
+| 🧐 **思考链可见** | 模型推理过程独立渲染 | 暗色主题区分，不与回复混淆 |
+| ⌨️ **打字机特效** | 智能缓冲，100ms tick | 吐字速度随积压动态调节，UI 永不掉队 |
+| ✋ **随时中断** | `Ctrl+C` 或双击 `ESC` 终止回复 | 独立子 context，不杀常驻协程 |
+| ♻️ **上下文管理** | 完整对话历史 + 中断续接 | 命令循环机制，AI 可逐步执行任务 |
+
+### 🎨 交互体验
+
+| 特性 | 说明 |
+|------|------|
+| 🦈 **鲨鱼动画** | 回复时底部 `[▰ ▰ 🦈 ▰ ▰]` 表示忙碌，不再是冰冷的 spinner |
+| 🖼️ **壁纸轮播** | 目录幻灯片，独立调节亮度 & 透明度 |
+| 🎭 **ASCII 横幅** | 可自定义艺术字 logo，与对话流合并滚动 |
+| 🎨 **真彩色** | 16.7M 色 VT 转义序列渲染 |
+| 🖱️ **鼠标操作** | 滚轮 + 自绘高亮选中 + OSC52 剪贴板 |
+
+### 🔧 底层架构
+
+| 特性 | 说明 |
+|------|------|
+| ⚙️ **自研渲染器** | 不依赖 ncurses / termbox / OpenTUI |
+| 📦 **双缓冲差异刷新** | 仅输出变化单元格，终端 I/O 最小化 |
+| 🔀 **跨平台后端** | Windows kernel32 / Unix termios，统一接口 |
+| 🧩 **单二进制分发** | `go build` 即得，零依赖 |
+| 🧪 **纯函数优先** | 鼠标解析、选区计算、OSC52 编码全部表驱动单测 |
+
+---
+
+## ⌨️ 快捷键
+
+### 回复进行中
 
 | 操作 | 效果 |
 |------|------|
-| `Ctrl+C` | 取消当前回复，保留已生成内容，末尾追加「⏹ 已终止」标记 |
-| `ESC` × 2（600ms 内） | 同上——取消回复 |
-| 鼠标滚轮 | 滚动查看历史消息（回复生成期间也可操作） |
+| `Ctrl+C` | 🛑 取消回复，已生成内容保留 + 「⏹ 已终止」标记 |
+| `ESC` × 2 (600ms) | 🛑 同上 |
+| `🖱️ 滚轮` | 📜 滚动查看历史 |
 
-取消后输入栏会短暂显示「已终止AI答复」，约 3 秒后或开始输入时自动恢复。
+> 取消后输入栏暂显「已终止AI答复」，3 秒后或开始输入时自动恢复。
 
 ### 空闲时
 
 | 操作 | 效果 |
 |------|------|
-| `Ctrl+C`（输入栏非空） | 清空输入内容 |
-| `Ctrl+C`（输入栏为空） | 提示「再按一次退出」，5 秒内再次按下即退出 |
-| 任何其他按键 | 取消退出等待状态 |
-| 方向键 ↑ / ↓ | 浏览/切换历史输入 |
+| `Ctrl+C` (有内容) | 清空输入 |
+| `Ctrl+C` (无内容) | 再按一次退出（5 秒超时） |
+| `↑ / ↓` | 浏览历史输入 |
+| `Tab` | 命令补全 |
 
 ---
 
-## 鼠标操作
+## 🖱️ 鼠标操作
 
-由于开启了鼠标捕获以支持滚轮，终端原生的文本选中功能被程序接管，因此实现了**程序内自绘选区**，提供一致的跨平台体验。
-
-### 选中与复制
+终端原生选中被鼠标捕获接管，所以——自己画。
 
 ```
 ┌─────────────────────────────────────────────┐
-│  会话区文本 ◄─── 按住左键拖拽 ────► 高亮选区 │
-│  输入框文本 ◄─── 按住左键拖拽 ────► 高亮选区 │
-│                                            │
-│  选中后按 Ctrl+C ──► OSC52 ──► 系统剪贴板   │
+│  📝 会话区  ◄─── 拖拽 ────►  🔦 高亮选区    │
+│  ✏️  输入框  ◄─── 拖拽 ────►  🔦 高亮选区    │
+│                                             │
+│  选中后 Ctrl+C ──► OSC52 ──► 📋 系统剪贴板   │
 └─────────────────────────────────────────────┘
 ```
 
-- **会话区 + 输入框**均可拖拽选中（支持跨行、CJK 宽字符、反向拖拽、跨区域拖选）
-- 选区锚定逻辑行位置，**滚动时高亮跟随内容移动**
-- 占位符与提示文案行不可选
-- 开始输入或点击不可选区时自动清除选区
+- **会话区 + 输入框**均可选中，支持跨行、CJK、反向、跨区域拖选
+- 选区锚定逻辑行，**滚动时高亮跟随内容** ✨
+- 占位符/提示文案不参与选中
+- 点击不可选区或开始输入立刻清除
 
-### 技术细节
+### `Ctrl+C` 优先级规则
 
-> OSC52 复制依赖终端支持：Windows Terminal、iTerm2、现代 Linux 终端均原生支持。tmux 需 `set -g set-clipboard on`。不支持的环境下复制会无声失败——不会产生错误提示。
+```
+┌─ 有选区？ ──► 📋 复制
+│
+└─ 无选区 ─┬─ AI 回复中？ ──► 🛑 取消回复
+           │
+           └─ 空闲 ──► 🗑️ 清空 / 🚪 退出
+```
 
-### Ctrl+C 优先级
+### OSC52 兼容性
 
-| 上下文 | 行为 |
-|--------|------|
-| 有选区 | **复制**选区文本到剪贴板 |
-| 无选区 + AI 回复中 | **取消**当前 AI 回复 |
-| 无选区 + 空闲 | 清空输入 / **退出**确认 |
-
-AI 回复中也**可双击 `ESC`** 取消，与 `Ctrl+C` 等效。
+> Windows Terminal、iTerm2、现代 Linux 终端均原生支持 OSC52。tmux 需 `set -g set-clipboard on`。不支持的环境无声失败。
 
 ---
 
-## 架构概览
+## 🏗️ 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   app/app.go                        │
-│   事件循环 · 信号处理 · 原始模式生命周期 · 串联一切   │
+│                    app/app.go                        │
+│   事件循环 · 信号 · 原始模式 · 崩溃安全 · 串联万物    │
 ├─────────────────────────────────────────────────────┤
-│               internal/ 分层架构                      │
+│                  internal/ 分层架构                   │
 │                                                     │
 │  ┌─────────┐  ┌─────────┐  ┌──────────────────┐    │
-│  │ ui/     │  │ screen/ │  │ editor/          │    │
-│  │ 布局    │  │ 双缓冲   │  │ 文本编辑器模型    │    │
-│  │ 背景    │  │ 差异刷新 │  │ CJK 感知换行     │    │
-│  │ 横幅    │  │ VT 输出  │  │ 光标/滚动       │    │
-│  │ 消息渲染│  └─────────┘  └──────────────────┘    │
-│  └────┬────┘                                       │
-│       │                                            │
+│  │ 🎨 ui/  │  │ 🖥️ screen│  │ ✏️ editor/      │    │
+│  │ 布局/背景│  │ 双缓冲   │  │ 文本编辑模型      │    │
+│  │ 横幅/消息│  │ 差异刷新 │  │ CJK 换行/光标   │    │
+│  └────┬────┘  └─────────┘  └──────────────────┘    │
+│       │                                             │
 │  ┌────┴────┐  ┌─────────┐  ┌──────────────────┐    │
-│  │ input/  │  │ config/ │  │ terminal/        │    │
+│  │ ⌨️ input│  │ ⚙️ config│  │ 🔌 terminal/    │    │
 │  │ 按键码  │  │ JSON    │  │ 终端接口抽象      │    │
-│  │ 鼠标解析│  │ ldflags │  │ Win/Unix 后端    │    │
-│  │ 转义序列│  └─────────┘  └──────────────────┘    │
-│  └─────────┘                                       │
+│  │ 鼠标 SGR│  │ ldflags │  │ Win/Unix 后端     │    │
+│  └─────────┘  └─────────┘  └──────────────────┘    │
 │                                                     │
 │  ┌─────────┐  ┌─────────┐                           │
-│  │ style/  │  │ clipboard│                           │
-│  │ 颜色    │  │ OSC52    │  ← 叶子包，零依赖         │
-│  │ 主题    │  │ 编码     │                           │
-│  └─────────┘  └─────────┘                           │
+│  │ 🎭 style│  │ 📋 clip-│  ← 叶子包，零依赖        │
+│  │ 颜色/主题│  │ board   │                           │
+│  └─────────┘  │ OSC52   │                           │
+│               └─────────┘                           │
 ├─────────────────────────────────────────────────────┤
 │                    main.go                           │
 │            薄入口：参数 → 配置 → app.Run              │
 └─────────────────────────────────────────────────────┘
 ```
 
-### 设计原则
+### 设计信条
 
-- **有向无环依赖**：`style/`、`input/`、`clipboard/` 为叶子包，`ui/` 组合 `screen/` + `editor/` + `config/` + `style/`，`app/` 串联一切。无循环依赖。
-- **平台后端接口化**：唯一与 OS 相关的部分是 `terminal.Terminal` 接口，编译时通过 Go 构建标签选择实现。所有 VT 转义序列（备选屏幕、光标可见性、同步输出、真彩色）均位于平台无关层。
-- **纯函数优先**：鼠标解析、选区计算、OSC52 编码均为纯函数，表驱动单测覆盖。
+- **无环依赖** — `style/` → `input/` → `config/` → ... → `app/`，禁止反向引用
+- **接口化后端** — `terminal.Terminal` 编译时注入，VT 序列全部平台无关
+- **纯函数优先** — 每一段可测试的逻辑都不是方法，是函数
 
 ---
 
-## 项目结构
+## 📁 项目结构
 
 ```
-├── main.go                   入口：命令行参数 → 配置 → app.Run
-├── app/                      事件循环 · 崩溃安全 · 信号生命周期
-│   ├── app.go                主循环（~900 行）
-│   ├── input.go              通用输入读取调度
-│   ├── input_windows.go      Windows ReadConsoleInput 读取器
-│   ├── state.go              会话状态结构
-│   └── *.go                  跨平台 resize / 其他
+StrikeCore/
+├── main.go                    薄入口
+├── app/                       事件循环 · 崩溃安全 · 信号生命周期
+│   ├── app.go                 主循环 (~900 行)
+│   ├── input.go               ⌨️ 输入调度
+│   ├── input_windows.go       🪟 Windows 原生鼠标读取
+│   ├── state.go               📦 会话状态
+│   └── command_test.go        🧪 /reload 测试
 ├── internal/
-│   ├── style/                颜色 · 主题（叶子包）
-│   ├── input/                按键码 · 终端转义序列解析 · 鼠标 SGR 协议
-│   ├── config/               运行时配置（JSON 合并 + ldflags）
-│   ├── screen/               单元格缓冲区 · 双缓冲差异刷新 · VT 输出
-│   ├── terminal/             终端接口抽象 · Windows/Unix 后端
-│   ├── editor/               纯文本编辑器模型（CJK 换行 · 光标 · 滚动）
-│   ├── ui/                   布局 · 背景 · 横幅 · 消息渲染 · 视图
-│   └── clipboard/            OSC52 剪贴板编码（叶子包）
-├── data/                     运行时生成的配置与资源目录
-│   ├── config.json           主配置
-│   ├── api.json              API 密钥与模型配置
-│   └── backgrounds/          壁纸图片 + 轮播配置
-└── Makefile                  构建 · 测试 · 交叉编译
+│   ├── style/                 🎭 颜色 · 主题（叶子）
+│   ├── input/                 ⌨️ 按键码 · ESC 序列 · SGR 鼠标协议
+│   ├── config/                ⚙️ 运行时配置 + ldflags 版本号
+│   ├── screen/                🖥️ 单元格缓冲区 · 双缓冲差异刷新
+│   ├── terminal/              🔌 终端接口 · Win/Unix 后端
+│   ├── editor/                ✏️ 文本编辑器模型（CJK、光标、滚动）
+│   ├── ui/                    🎨 布局 · 背景 · 横幅 · 消息渲染
+│   └── clipboard/             📋 OSC52 编码（叶子）
+├── data/                      运行时配置
+│   ├── config.json            主配置
+│   ├── api.json               API 配置
+│   └── backgrounds/           壁纸 + 轮播配置
+├── logo.png                   🖼️ Logo
+├── screenshot.png             📸 界面截图
+└── LICENSE                    ⚖️ GPLv3
 ```
 
 ---
 
-## 配置说明
+## ⚙️ 配置说明
 
 ### 主配置 `data/config.json`
 
 ```json
 {
   "model_name": "your-model-name",
-  "hint": "↑ 输入内容，Ctrl+C 退出",
   "brightness": 0.35,
   "bg_path": "/path/to/custom.png",
   "bg_interval": 60,
-  "ascii_art": ["line1", "line2", "line3"],
+  "ascii_art": ["line1", "line2"],
   "theme": {
     "art_left": "#60CDFF",
-    "art_right": "#0078D4",
-    "hint_fg": "#C8A060"
+    "art_right": "#0078D4"
   }
 }
 ```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `model_name` | string | AI 模型名称 |
-| `hint` | string | 输入栏提示文字 |
-| `brightness` | float (0-1) | 背景图片亮度 |
-| `bg_path` | string | 自定义背景图路径（覆盖内嵌资源） |
-| `bg_interval` | int | 壁纸轮播间隔（秒） |
-| `ascii_art` | string[] | 自定义横幅文本行 |
-| `theme` | object | 主题颜色覆盖 |
-
-> `bg_path` 加载失败时会优雅降级——先回退到内嵌图片，再回退到纯色背景。
 
 ### API 配置 `data/api.json`
 
@@ -295,83 +265,81 @@ AI 回复中也**可双击 `ESC`** 取消，与 `Ctrl+C` 等效。
 
 ### 壁纸配置 `data/backgrounds/config.json`
 
-控制幻灯片行为、气泡背景透明度和图片亮度：
-
-```json
-{
-  "enabled": true,
-  "interval": 60,
-  "wallpaper": "",
-  "bubble_bg_opacity": 0,
-  "brightness": 0.35
-}
-```
-
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `enabled` | bool | 启用轮播 |
 | `interval` | int | 切换间隔（秒） |
-| `wallpaper` | string | 指定图片文件（空=文件夹第一张） |
-| `bubble_bg_opacity` | float (0-1) | 0=纯色不透明 → 1=完全透明 |
-| `brightness` | float (0-1) | 图片亮度 |
+| `wallpaper` | string | 指定图片（空 = 第一张） |
+| `bubble_bg_opacity` | float | 气泡透明度 0-1 |
+| `brightness` | float | 图片亮度 0-1 |
 
-> 该文件首次运行时自动生成，也可在运行中通过输入 `/reload` 即时重载。
+> 配置文件首次运行自动生成。输入 `/reload` 即时重载全部壁纸配置。
 
 ### 运行时命令
 
 | 命令 | 作用 |
 |------|------|
-| `/reload` | 重新读取壁纸配置，即时应用透明度、亮度、壁纸切换、轮播开关 |
-| `/clear-history` | 清空当前会话历史 |
+| `/reload` | 🔄 重载壁纸配置（透明度、亮度、轮播） |
+| `/clear-history` | 🗑️ 清空会话历史 |
 
 ---
 
-## 跨平台支持
+## 🪟 跨平台支持
 
-| 能力 | Windows | Unix (Linux/macOS) |
-|------|---------|-------------------|
-| 终端接口 | kernel32 控制台模式 | `golang.org/x/term` |
-| 原始输入 | `ReadConsoleInput` | 标准字节流 |
-| 尺寸变化 | 轮询 + `WINDOW_BUFFER_SIZE_EVENT` | `SIGWINCH` 信号 |
-| VT 序列 | 全部可移植（?1049h、同步输出、真彩色） | 同左 |
-| 鼠标输入 | ReadConsoleInput → SGR 合成 | 原生 VT ?1006h |
-| 构建 | `GOOS=windows go build` | `GOOS=linux/darwin go build` |
+```
+┌────────────────┬──────────────────┬──────────────────┐
+│    能力        │    Windows       │   Unix (Linux)   │
+├────────────────┼──────────────────┼──────────────────┤
+│ 终端控制       │ kernel32 API     │ golang.org/x/term │
+│ 原始输入       │ ReadConsoleInput │ 标准字节流        │
+│ 尺寸变化       │ 轮询 + 事件      │ SIGWINCH 信号     │
+│ VT 序列        │ 全部可移植       │ 全部可移植        │
+│ 鼠标           │ 原生 → SGR 合成  │ 原生 VT ?1006h   │
+│ 构建           │ GOOS=windows     │ GOOS=linux/darwin │
+└────────────────┴──────────────────┴──────────────────┘
+```
 
-所有 VT 转义序列（备选屏幕、光标可见性、同步输出、真彩色、鼠标协议）均在平台无关层实现，通过统一的 `terminal.Terminal` 接口与各平台后端交互。
+所有 VT 转义序列（备选屏幕、同步输出、真彩色、鼠标协议）在平台无关层实现，通过 `terminal.Terminal` 接口统一调度。
 
 ---
 
-## 测试
+## 🧪 质量保障
 
 ```bash
 make test        # go test ./...
 make test-race   # go test -race ./...（需 CGO）
-make lint        # go vet + gofmt 检查
+make lint        # go vet + gofmt
 ```
-
-### 测试覆盖范围
 
 | 包 | 覆盖内容 |
 |----|---------|
-| `internal/input/` | 按键解析、SGR 鼠标序列（坐标 + 事件类型） |
-| `internal/editor/` | 文本编辑操作、CJK 换行、光标滚动 |
-| `internal/screen/` | 双缓冲差异刷新（`bytes.Buffer` 断言） |
-| `internal/ui/` | 布局几何（黄金测试）、选区命中/抽取、colAtCellX 映射 |
-| `internal/clipboard/` | OSC52 编码（base64 正确性、CJK、空串） |
-| `internal/config/` | JSON 加载、默认值合并 |
-| `app/` | 手柄命令（`/reload`）、核心状态逻辑 |
+| `internal/input/` | 按键 + SGR 鼠标（坐标、事件类型） |
+| `internal/editor/` | 编辑操作、CJK 换行、光标滚动 |
+| `internal/screen/` | 双缓冲 diff（`bytes.Buffer` 断言） |
+| `internal/ui/` | 布局几何、选区命中/抽取、列映射 |
+| `internal/clipboard/` | OSC52 编码（base64、CJK、空串） |
+| `internal/config/` | JSON 加载、默认合并 |
+| `app/` | `/reload` 命令、核心逻辑 |
 
-测试套件在 Windows / Linux / macOS CI 上全平台运行。
+全平台 CI：Windows · Linux · macOS
 
 ---
 
-## 许可
+## ⚖️ 许可
 
 [GNU General Public License v3](LICENSE)
 
 ---
 
 <p align="center">
-  <sub>StrikeCore · 终端里的 AI 智能体</sub><br>
-  <sub>StrikeCore is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.</sub>
+  <sub>StrikeCore · 一头游弋在终端里的鲨鱼</sub><br>
+  <sub>StrikeCore is free software: you can redistribute it and/or modify it under the terms of the GPLv3.</sub>
+</p>
+
+<p align="center">
+  <sub>
+  █▀▀▀ ▀█▀ █▀▀▄ ▀█▀ █ ▄▀ █▀▀▀  █▀▀▀ █▀▀█ █▀▀▄ █▀▀▀<br>
+  ▀▀▀█  █  █▀█   █  █▀▄  █▀▀   █    █  █ █▀█  ▀▀▀█<br>
+  ▀▀▀▀  ▀  ▀  ▀ ▀▀▀ ▀  ▀ ▀▀▀▀  ▀▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀
+  </sub>
 </p>
