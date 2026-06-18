@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="data/logo.png" alt="StrikeCore" width="120" style="border-radius: 12px;">
+  <img src="logo.png" alt="StrikeCore" width="120" style="border-radius: 12px;">
 </p>
 
 <h3 align="center">StrikeCore</h3>
