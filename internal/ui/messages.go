@@ -10,7 +10,7 @@ import (
 type Message struct {
 	Role      string // "user" 或 "assistant"
 	Content   string
-	Reasoning string // 模型的思考过程（如 DeepSeek-R1 的 reasoning_content）
+	Reasoning string // 模型的思考过程（如推理模型的 reasoning_content）
 }
 
 // lineKind 标识一行渲染出的气泡行的类型。

@@ -67,7 +67,7 @@ type openAIProvider struct {
 }
 
 // NewOpenAIProvider 创建 OpenAI 兼容 API 的 LLM Provider。
-// BaseURL 示例：https://api.minimax.chat/v1
+// BaseURL 示例：https://api.example.com/v1
 func NewOpenAIProvider(cfg OpenAIConfig) Provider {
 	return &openAIProvider{
 		config: cfg,
