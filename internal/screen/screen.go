@@ -190,7 +190,7 @@ func (s *Screen) Flush(cur style.Cursor) {
 		s.writeInt(cur.Col + 1)
 		s.buf.WriteByte('H')
 		s.prevCursorVisible = true
-	} else if needHide {
+	} else if needHide && s.prevCursorVisible {
 		s.buf.WriteString("\x1b[?25l")
 		s.prevCursorVisible = false
 	}

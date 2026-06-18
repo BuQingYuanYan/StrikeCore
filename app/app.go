@@ -129,17 +129,33 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 	if bgDirCfg.BubbleBgOpacity != nil {
 		view.SetBubbleBgOpacity(*bgDirCfg.BubbleBgOpacity)
 	}
+
+	// 轻量 token 估算：ASCII 按 字符数×0.3，非 ASCII 按 ×0.6。
+	// 全离线、零依赖，用作厂商返回 usage 前的流中实时值。
+	countTokens := func(text string) int {
+		n := 0
+		for _, r := range text {
+			if r <= 0x7F {
+				n += 3 // ×0.3
+			} else {
+				n += 6 // ×0.6
+			}
+		}
+		return n / 10
+	}
 	ed := &editor.Editor{}
 	st := &chatState{}
 	// 文字输出与鲨鱼动画用两个独立的 ticker，互不干扰：
 	// emitTicker 快速吐字（追平模型），sharkTicker 固定 ~5fps 推进动画帧，
 	// 这样吐字提速不会让动画节奏抖动。
 	var (
-		emitTicker  *time.Ticker
-		emitCh      <-chan time.Time
-		sharkTicker *time.Ticker
-		sharkCh     <-chan time.Time
-		aiCancel    context.CancelFunc // 取消当前 AI 请求的子 context；nil 表示无进行中的请求
+		emitTicker      *time.Ticker
+		emitCh          <-chan time.Time
+		sharkTicker     *time.Ticker
+		sharkCh         <-chan time.Time
+		aiCancel        context.CancelFunc // 取消当前 AI 请求的子 context；nil 表示无进行中的请求
+		aiTimeoutTimer  *time.Timer
+		aiTimeoutCh     <-chan time.Time
 		// AI 流式响应通道。每次请求一条新通道：取消旧请求后其 goroutine 仍会
 		// close 自己那条旧通道，但事件循环只读取当前 streamCh，因此旧通道的关闭
 		// 或残留 delta 不会污染新一轮请求。idle 时为 nil（nil 通道永久阻塞，符合预期）。
@@ -177,36 +193,103 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 		// Render 会把 scroll 钳制到合法范围（尤其是发送消息后设的
 		// “滚动到底部”哨兵值）；读回钳制结果，使后续滚轮上滚从真实底部开始。
 		st.scroll = view.ScrollOffset()
+		st.lastMaxScroll = view.MaxScroll()
 		s.Flush(cur)
 	}
 
 	// emitOnce 只负责文字输出：每 tick 吐出若干字符（数量随积压动态增长），
 	// 缓冲清空且上游流结束时收尾、停掉两个 ticker。不再驱动鲨鱼动画。
 	emitOnce := func() {
+		setTokenText := func(emoji string, current int, currentEst bool, total int, totalEst bool) {
+			cur := ""
+			if currentEst {
+				cur = fmt.Sprintf("%s ~%d", emoji, current)
+			} else {
+				cur = fmt.Sprintf("%s %d", emoji, current)
+			}
+			if total > 0 {
+				tot := ""
+				if totalEst {
+					tot = fmt.Sprintf("∑ ~%d", total)
+				} else {
+					tot = fmt.Sprintf("∑ %d", total)
+				}
+				view.SetTokenText(cur + " · " + tot + " tokens")
+			} else {
+				view.SetTokenText(cur + " tokens")
+			}
+		}
 		if st.bufReasoning != "" {
+			if st.thinkingStart.IsZero() {
+				st.thinkingStart = time.Now()
+			}
 			emitted, rest := takeRunes(st.bufReasoning, emitCount(st.bufReasoning))
 			appendStreamReasoning(&st.messages, emitted)
 			st.bufReasoning = rest
-			st.jumpToBottom()
+			if !st.scrollLocked {
+				st.jumpToBottom()
+			}
 			render()
 		} else if st.bufContent != "" {
 			emitted, rest := takeRunes(st.bufContent, emitCount(st.bufContent))
 			appendStreamContent(&st.messages, emitted)
 			st.bufContent = rest
-			st.jumpToBottom()
+			if !st.scrollLocked {
+				st.jumpToBottom()
+			}
 			render()
 		} else if st.aiPending {
 			if st.streamDone {
+				storeThinkingDuration(&st.messages, st.thinkingStart)
+				st.thinkingStart = time.Time{}
+				if st.tokenFinal {
+					st.sessionTotal += st.tokenTotal
+				} else {
+					st.sessionTotal += st.promptTokens + st.completionTokens
+				}
+				st.requestCount++
+				total := 0
+				if st.requestCount > 1 {
+					total = st.sessionTotal
+				}
+				if st.tokenFinal {
+					setTokenText("🚀", st.tokenTotal, false, total, false)
+				} else {
+					setTokenText("🚀", st.promptTokens+st.completionTokens, false, total, false)
+				}
 				st.aiPending = false
+				st.streamDone = false
+				st.escPendingAt = time.Time{}
 				view.SetSharkActive(false)
 				stopStreamTickers()
+				if aiTimeoutTimer != nil {
+					aiTimeoutTimer.Stop()
+					aiTimeoutTimer = nil
+					aiTimeoutCh = nil
+				}
 				if aiCancel != nil {
 					aiCancel()
 					aiCancel = nil
 				}
 				streamCh = nil
+			} else {
+				cur := st.promptTokens + st.completionTokens
+				if st.requestCount > 0 {
+					setTokenText("🚀", cur, false, st.sessionTotal+cur, true)
+				} else {
+					setTokenText("🚀", cur, false, 0, false)
+				}
 			}
 			render()
+			return
+		}
+		if st.aiPending {
+			cur := st.promptTokens + st.completionTokens
+			if st.requestCount > 0 {
+				setTokenText("🚀", cur, false, st.sessionTotal+cur, true)
+			} else {
+				setTokenText("🚀", cur, false, 0, false)
+			}
 		}
 	}
 
@@ -225,6 +308,13 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 		bgSlideTicker *time.Ticker
 		bgSlideCh     <-chan time.Time
 		bgIndex       int
+		// 壁纸渐入渐出过渡
+		bgFadeTicker  *time.Ticker
+		bgFadeCh      <-chan time.Time
+		bgFadeStart   time.Time
+		bgFadeTargetBri float64
+		bgFadeNextIdx   int
+		bgFadeMidpoint  bool
 	)
 	if bgDirCfg.Enabled != nil && !*bgDirCfg.Enabled {
 		slideReady = false
@@ -257,6 +347,9 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 		if bgSlideTicker != nil {
 			bgSlideTicker.Stop()
 		}
+		if bgFadeTicker != nil {
+			bgFadeTicker.Stop()
+		}
 	}()
 
 	inputCh := make(chan []byte, 128)
@@ -265,15 +358,13 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 	go watchResize(ctx, term, resizeCh)
 
 	var (
-		pending        []byte
-		debounceTimer  *time.Timer
-		debounceCh     <-chan time.Time
-		quitTimer      *time.Timer
-		quitTimerCh    <-chan time.Time
-		aiTimeoutTimer *time.Timer
-		aiTimeoutCh    <-chan time.Time
-		abortTimer     *time.Timer
-		abortCh        <-chan time.Time
+		pending       []byte
+		debounceTimer *time.Timer
+		debounceCh    <-chan time.Time
+		quitTimer     *time.Timer
+		quitTimerCh   <-chan time.Time
+		abortTimer    *time.Timer
+		abortCh       <-chan time.Time
 	)
 	defer func() {
 		if debounceTimer != nil {
@@ -295,7 +386,8 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 	}()
 
 	// cancelAI 取消进行中的 AI 回复：终止子 context、冲刷已收到的缓冲（保留已生成内容）、
-	// 追加终止标记、收尾动画与计时器，并在输入栏占位处提示「已终止AI答复」（3 秒后自动恢复）。
+	// 追加中断标记、收尾动画与计时器，并在输入栏占位处提示「已中断」（3 秒后自动恢复）。
+	// 若 AI 尚未输出任何内容，则不追加终止气泡，且清理预创建的空 assistant 消息。
 	cancelAI := func() {
 		if !st.aiPending {
 			return
@@ -305,6 +397,28 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 			aiCancel = nil
 		}
 		streamCh = nil
+
+		hasPendingContent := st.bufContent != "" || st.bufReasoning != ""
+		hasEmittedContent := false
+		if len(st.messages) > 0 {
+			last := st.messages[len(st.messages)-1]
+			if last.Role == "assistant" && (last.Content != "" || last.Reasoning != "") {
+				hasEmittedContent = true
+			}
+		}
+		hasAnyContent := hasPendingContent || hasEmittedContent
+		if !hasAnyContent && len(st.messages) > 0 {
+			last := st.messages[len(st.messages)-1]
+			if last.Role == "assistant" && last.Content == "" && last.Reasoning == "" {
+				st.messages = st.messages[:len(st.messages)-1]
+			}
+		}
+
+		if hasAnyContent {
+			storeThinkingDuration(&st.messages, st.thinkingStart)
+			st.thinkingStart = time.Time{}
+		}
+
 		if st.bufReasoning != "" {
 			appendStreamReasoning(&st.messages, st.bufReasoning)
 			st.bufReasoning = ""
@@ -313,7 +427,16 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 			appendStreamContent(&st.messages, st.bufContent)
 			st.bufContent = ""
 		}
-		appendStreamContent(&st.messages, "\n\n⏹ 已终止")
+		if hasAnyContent {
+			termMarker := "\n⏹ 已终止"
+			if len(st.messages) > 0 {
+				last := st.messages[len(st.messages)-1]
+				if last.Role == "assistant" && last.Content == "" {
+					termMarker = "⏹ 已终止"
+				}
+			}
+			appendStreamContent(&st.messages, termMarker)
+		}
 		st.aiPending = false
 		st.streamDone = false
 		st.escPendingAt = time.Time{}
@@ -330,6 +453,14 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 		}
 		abortTimer = time.NewTimer(3 * time.Second)
 		abortCh = abortTimer.C
+		est := st.promptTokens + st.completionTokens
+		st.sessionTotal += est
+		st.requestCount++
+		if st.requestCount > 1 {
+			view.SetTokenText(fmt.Sprintf("🚫 %d · ∑ %d tokens", est, st.sessionTotal))
+		} else {
+			view.SetTokenText(fmt.Sprintf("🚫 %d tokens", est))
+		}
 		st.jumpToBottom()
 		render()
 	}
@@ -431,13 +562,61 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 			if debounceTimer != nil {
 				continue // 正在调整大小——跳过以避免卡顿
 			}
-			bgIndex = (bgIndex + 1) % len(bgImages)
-			if !bg.Activate(bgImages[bgIndex]) {
-				bg.Load(bgImages[bgIndex]) // fallback: synchronous
+			bgSlideTicker.Stop()
+			bgSlideTicker = nil
+			bgSlideCh = nil
+			bgFadeNextIdx = (bgIndex + 1) % len(bgImages)
+			bgFadeStart = time.Now()
+			bgFadeMidpoint = false
+			bgFadeTargetBri = bg.Brightness()
+			bgFadeTicker = time.NewTicker(16 * time.Millisecond)
+			bgFadeCh = bgFadeTicker.C
+		case <-bgFadeCh:
+			if bgFadeTicker == nil {
+				continue
 			}
-			nextIdx := (bgIndex + 1) % len(bgImages)
-			bg.Preload(bgImages[nextIdx])
+			if bgSlideCh != nil {
+				bgFadeTicker.Stop()
+				bgFadeTicker = nil
+				bgFadeCh = nil
+				continue
+			}
+			elapsed := time.Since(bgFadeStart)
+			half := 250 * time.Millisecond
+			target := bgFadeTargetBri
+			if elapsed < half {
+				p := float64(elapsed) / float64(half)
+				bg.SetBrightness(target * (1 - p))
+			} else if !bgFadeMidpoint {
+				bgFadeMidpoint = true
+				bgIndex = bgFadeNextIdx
+				if !bg.Activate(bgImages[bgIndex]) {
+					bg.Load(bgImages[bgIndex])
+				}
+				nextIdx := (bgIndex + 1) % len(bgImages)
+				bg.Preload(bgImages[nextIdx])
+				bg.SetBrightness(0)
+			}
+			if elapsed >= half {
+				p := float64(elapsed-half) / float64(half)
+				if p > 1 {
+					p = 1
+				}
+				bg.SetBrightness(target * p)
+			}
 			render()
+			if elapsed >= 2*half {
+				bgFadeTicker.Stop()
+				bgFadeTicker = nil
+				bgFadeCh = nil
+				bg.SetBrightness(target)
+				if bgImages != nil && len(bgImages) > 1 {
+					nextIdx := (bgIndex + 1) % len(bgImages)
+					bg.Preload(bgImages[nextIdx])
+					bgSlideTicker = time.NewTicker(cfg.BgInterval)
+					bgSlideCh = bgSlideTicker.C
+				}
+			}
 			continue
 		case <-quitTimerCh:
 			st.quitPending = false
@@ -465,11 +644,17 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 					aiTimeoutTimer = nil
 					aiTimeoutCh = nil
 				}
+				if msg.TokenUsage != nil {
+					st.tokenTotal = msg.TokenUsage.TotalTokens
+					st.tokenFinal = true
+				}
 				if msg.Reasoning != "" {
 					st.bufReasoning += msg.Reasoning
+					st.completionTokens += countTokens(msg.Reasoning)
 				}
 				if msg.Content != "" {
 					st.bufContent += msg.Content
+					st.completionTokens += countTokens(msg.Content)
 				}
 			} else {
 				st.streamDone = true
@@ -486,6 +671,25 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 			streamCh = nil
 			aiTimeoutTimer = nil
 			aiTimeoutCh = nil
+			hasPendingContent := st.bufContent != "" || st.bufReasoning != ""
+			hasEmittedContent := false
+			if len(st.messages) > 0 {
+				last := st.messages[len(st.messages)-1]
+				if last.Role == "assistant" && (last.Content != "" || last.Reasoning != "") {
+					hasEmittedContent = true
+				}
+			}
+			hasAnyContent := hasPendingContent || hasEmittedContent
+			if !hasAnyContent && len(st.messages) > 0 {
+				last := st.messages[len(st.messages)-1]
+				if last.Role == "assistant" && last.Content == "" && last.Reasoning == "" {
+					st.messages = st.messages[:len(st.messages)-1]
+				}
+			}
+			if hasAnyContent {
+				storeThinkingDuration(&st.messages, st.thinkingStart)
+				st.thinkingStart = time.Time{}
+			}
 			if st.bufReasoning != "" {
 				appendStreamReasoning(&st.messages, st.bufReasoning)
 				st.bufReasoning = ""
@@ -494,7 +698,25 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 				appendStreamContent(&st.messages, st.bufContent)
 				st.bufContent = ""
 			}
-			appendStreamContent(&st.messages, "\n\n⏱️ AI 响应超时（60s），请检查网络或 API 配置")
+			if hasAnyContent {
+				timeoutText := "\n⏱️ AI 响应超时（60s），请检查网络或 API 配置"
+				if len(st.messages) > 0 {
+					last := st.messages[len(st.messages)-1]
+					if last.Role == "assistant" && last.Content == "" {
+						timeoutText = "⏱️ AI 响应超时（60s），请检查网络或 API 配置"
+					}
+				}
+				appendStreamContent(&st.messages, timeoutText)
+			}
+			est := st.promptTokens + st.completionTokens
+			st.sessionTotal += est
+			st.requestCount++
+			if st.requestCount > 1 {
+				view.SetTokenText(fmt.Sprintf("⏱ %d · ∑ %d tokens", est, st.sessionTotal))
+			} else {
+				view.SetTokenText(fmt.Sprintf("⏱ %d tokens", est))
+			}
+			st.jumpToBottom()
 			render()
 			continue
 		case data, ok := <-inputCh:
@@ -662,8 +884,22 @@ func Run(cfg config.Config, dataDir string, workDir string, provider llm.Provide
 					view.SetSharkFrame(0)
 					render()
 
-					st.aiPending = true
-					// 为本次请求派生可单独取消的子 context，使 Ctrl+C / 双击 ESC
+				st.aiPending = true
+				st.streamDone = false
+				st.escPendingAt = time.Time{}
+				// 重置 token 统计
+				st.tokenTotal = 0
+				st.tokenFinal = false
+				st.completionTokens = 0
+				total := 0
+				for _, m := range apiMsgs {
+					total += countTokens(m.Content)
+				}
+				st.promptTokens = total
+				// 预创建一条空的 assistant 消息，后续流式内容会追加至此，
+				// 避免 appendStreamContent/appendStreamReasoning 误追加到上轮回复。
+				st.messages = append(st.messages, ui.Message{Role: "assistant"})
+				// 为本次请求派生可单独取消的子 context，使 Ctrl+C / 双击 ESC
 					// 能取消 AI 流，而不影响 readInput / watchResize 常驻协程。
 					aiCtx, cancelReq := context.WithCancel(ctx)
 					aiCancel = cancelReq
@@ -731,6 +967,23 @@ func appendStreamReasoning(msgs *[]ui.Message, delta string) {
 	*msgs = append(*msgs, ui.Message{Role: "assistant", Reasoning: delta})
 }
 
+// storeThinkingDuration 将 thinkingStart 耗时写入最后一条 assistant 消息的 ThinkingDuration。
+func storeThinkingDuration(msgs *[]ui.Message, thinkingStart time.Time) {
+	if thinkingStart.IsZero() {
+		return
+	}
+	d := time.Since(thinkingStart)
+	if d < minThinkingDuration {
+		return
+	}
+	for i := len(*msgs) - 1; i >= 0; i-- {
+		if (*msgs)[i].Role == "assistant" {
+			(*msgs)[i].ThinkingDuration = d.Round(time.Second)
+			return
+		}
+	}
+}
+
 // takeRunes 返回 s 的前 n 个 rune 以及剩余部分（按字节偏移正确切分）。
 func takeRunes(s string, n int) (head, tail string) {
 	if n <= 0 {
@@ -784,6 +1037,13 @@ func streamResponse(ctx context.Context, provider llm.Provider, messages []ui.Me
 		u := ui.Message{Role: "assistant", Content: msg.Content}
 		if msg.ReasoningContent != "" {
 			u.Reasoning = msg.ReasoningContent
+		}
+		if msg.Usage != nil {
+			u.TokenUsage = &ui.TokenUsage{
+				PromptTokens:     msg.Usage.PromptTokens,
+				CompletionTokens: msg.Usage.CompletionTokens,
+				TotalTokens:      msg.Usage.TotalTokens,
+			}
 		}
 		select {
 		case ch <- u:

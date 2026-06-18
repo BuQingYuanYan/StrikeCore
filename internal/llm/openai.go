@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -18,9 +19,15 @@ type openAIMessage struct {
 
 // openAIChatRequest 映射 OpenAI /chat/completions 请求体。
 type openAIChatRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
-	Stream   bool            `json:"stream,omitempty"`
+	Model         string               `json:"model"`
+	Messages      []openAIMessage      `json:"messages"`
+	Stream        bool                 `json:"stream,omitempty"`
+	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
+}
+
+// openAIStreamOptions 控制流式响应中的额外数据，例如 usage。
+type openAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // openAIChoice 映射 OpenAI 响应中的一个 choice。
@@ -52,6 +59,14 @@ type openAIStreamChoice struct {
 // openAIStreamChunk 映射 SSE 流式响应中的一行 data: JSON。
 type openAIStreamChunk struct {
 	Choices []openAIStreamChoice `json:"choices"`
+	Usage   *openAIUsage         `json:"usage,omitempty"`
+}
+
+// openAIUsage 由 API 在流末附带返回。
+type openAIUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // OpenAIConfig 是 OpenAI 兼容 API 的连接参数。
@@ -158,6 +173,9 @@ func (p *openAIProvider) ChatStream(ctx context.Context, messages []Message, opt
 		Model:    model,
 		Messages: apiMsgs,
 		Stream:   true,
+		StreamOptions: &openAIStreamOptions{
+			IncludeUsage: true,
+		},
 	}
 
 	raw, err := json.Marshal(body)
@@ -185,8 +203,16 @@ func (p *openAIProvider) ChatStream(ctx context.Context, messages []Message, opt
 
 	ch := make(chan Message, 8)
 	go func() {
-		defer resp.Body.Close()
+		var closeOnce sync.Once
+		closeBody := func() { resp.Body.Close() }
+		defer closeOnce.Do(closeBody)
 		defer close(ch)
+
+		// context 取消时关闭响应体，使阻塞的 Read 立即返回，避免 goroutine 泄漏
+		go func() {
+			<-ctx.Done()
+			closeOnce.Do(closeBody)
+		}()
 
 		br := NewSSEReader(resp.Body)
 		for {
@@ -198,14 +224,35 @@ func (p *openAIProvider) ChatStream(ctx context.Context, messages []Message, opt
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				continue
 			}
+			// 解析 usage（可能在 choices 为空的最后一行，或随末条 choice 一起返回）
+			var usage *Usage
+			if chunk.Usage != nil {
+				usage = &Usage{
+					PromptTokens:     chunk.Usage.PromptTokens,
+					CompletionTokens: chunk.Usage.CompletionTokens,
+					TotalTokens:      chunk.Usage.TotalTokens,
+				}
+			}
 			if len(chunk.Choices) == 0 {
+				if usage != nil {
+					select {
+					case ch <- Message{Usage: usage}:
+					case <-ctx.Done():
+					}
+				}
 				continue
 			}
 			delta := chunk.Choices[0].Delta
 			if delta.Content == "" && delta.ReasoningContent == "" {
+				if usage != nil {
+					select {
+					case ch <- Message{Usage: usage}:
+					case <-ctx.Done():
+					}
+				}
 				continue
 			}
-			msg := Message{Role: "assistant", Content: delta.Content}
+			msg := Message{Role: "assistant", Content: delta.Content, Usage: usage}
 			if delta.ReasoningContent != "" {
 				msg.ReasoningContent = delta.ReasoningContent
 			}

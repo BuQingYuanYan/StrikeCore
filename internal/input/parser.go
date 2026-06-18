@@ -47,6 +47,14 @@ func parseEscape(b []byte) (int, rune, int) {
 				return KeyHome, 0, 3
 			case 'F':
 				return KeyEnd, 0, 3
+			case 'P':
+				return KeyF1, 0, 3
+			case 'Q':
+				return KeyF2, 0, 3
+			case 'R':
+				return KeyF3, 0, 3
+			case 'S':
+				return KeyF4, 0, 3
 			}
 		}
 	}
@@ -76,6 +84,22 @@ func parseCSI(b []byte) (int, rune, int) {
 	case '1':
 		if len(b) >= 4 && b[3] == '~' {
 			return KeyHome, 0, 4
+		}
+		if len(b) >= 6 && b[3] == ';' && b[4] == '5' {
+			switch b[5] {
+			case 'A':
+				return KeyUp, 0, 6 // Ctrl+↑
+			case 'B':
+				return KeyDown, 0, 6 // Ctrl+↓
+			case 'C':
+				return KeyRight, 0, 6 // Ctrl+→
+			case 'D':
+				return KeyLeft, 0, 6 // Ctrl+←
+			}
+		}
+	case '2':
+		if len(b) >= 4 && b[3] == '~' {
+			return KeyInsert, 0, 4
 		}
 	case '3':
 		if len(b) >= 4 && b[3] == '~' {

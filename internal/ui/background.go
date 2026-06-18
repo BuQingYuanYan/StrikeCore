@@ -219,6 +219,9 @@ func (b *Background) SetBrightness(v float64) {
 	clear(b.cache[:])
 }
 
+// Brightness 返回当前亮度值。
+func (b *Background) Brightness() float64 { return b.brightness }
+
 // NewBackground 构建一个 Background。如果路径非空且可加载则使用；
 // 否则解码嵌入式资源。nil 的 raw 图像（两者都失败）会优雅降级：
 // Draw 是空操作，BotColor 返回零颜色。

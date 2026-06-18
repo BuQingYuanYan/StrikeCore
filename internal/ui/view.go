@@ -24,6 +24,7 @@ type View struct {
 	promptSpaces    string
 	messages        []Message
 	msgScroll       int
+	lastMaxScroll   int // 最近一次绘制的最大滚动偏移，用于判断用户是否在底部
 	bubbleBgOpacity float64 // 0=纯色不透明, 1=完全透明（透出背景图）
 	quitPending     bool    // 第一次 Ctrl+C 等待确认退出
 	aborted         bool    // AI 回复刚被取消，输入栏占位显示「已终止AI答复」，几秒后或按键时清除
@@ -47,20 +48,33 @@ type View struct {
 	bgSpaces     string
 	workLineDir  string
 	workLine     string
+
+	// 底部提示栏覆盖文本（例如 token 消耗），非空时替代 cfg.Hint
+	tokenText string
 }
 
-// SharkGradient 是鲨鱼动画 5 个方块位置的海洋渐变蓝。
+// SharkGradient 是鲨鱼动画 5 个位置从深到浅的海洋渐变蓝。
 var SharkGradient = [5]style.Color{
-	style.RGB(0x00, 0x44, 0x77), // 最深
+	style.RGB(0x00, 0x44, 0x77),
 	style.RGB(0x00, 0x66, 0xAA),
 	style.RGB(0x00, 0x88, 0xCC),
 	style.RGB(0x00, 0xAA, 0xEE),
-	style.RGB(0x33, 0xBB, 0xFF), // 最浅
+	style.RGB(0x33, 0xBB, 0xFF),
 }
 
-// SetSharkFrame 设置当前鲨鱼动画帧（0~4）。
+// SetSharkFrame 设置当前鲨鱼动画帧（单调递增计数器，驱动往返循环）。
 func (v *View) SetSharkFrame(n int) {
-	v.sharkFrame = n % 5
+	v.sharkFrame = n
+}
+
+// sharkDisplayPos 将单调递增的帧计数器转为 0~4 往返位置：→→→→←←←←…
+func sharkDisplayPos(frame int) int {
+	const max = 5
+	cycle := frame % (2 * (max - 1))
+	if cycle >= max {
+		cycle = 2*(max-1) - cycle
+	}
+	return cycle
 }
 
 // SharkFrame 返回当前鲨鱼动画帧。
@@ -129,9 +143,23 @@ func (v *View) ClearFlash() {
 	v.flashMsg = ""
 }
 
+// SetTokenText 设置底部提示栏覆盖文本（例如 token 消耗），
+// 非空时 drawWorkDir 用此替代 cfg.Hint。传入空字符串恢复默认提示。
+func (v *View) SetTokenText(text string) {
+	v.tokenText = text
+}
+
 // SetMessages 更新对话历史和滚动偏移。
 func (v *View) SetMessages(msgs []Message, scroll int) {
-	v.messages = msgs
+	// 过滤掉完全为空的 assistant 消息（预创建的空白占位，尚未收到流式内容）
+	filtered := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "assistant" && m.Content == "" && m.Reasoning == "" {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	v.messages = filtered
 	v.msgScroll = scroll
 }
 
@@ -174,6 +202,9 @@ func (v *View) Render(e *editor.Editor, w, h int) style.Cursor {
 
 // ScrollOffset 返回上一次 Render 钳制后的滚动偏移，供事件循环写回，使「到底后上滚」从真实底部开始。
 func (v *View) ScrollOffset() int { return v.msgScroll }
+
+// MaxScroll 返回最近一次绘制时的最大滚动偏移（maxScroll），用于判断用户是否已在底部。
+func (v *View) MaxScroll() int { return v.lastMaxScroll }
 
 func (v *View) drawBgImage(w, h int) {
 	if v.bg.topColors == nil {
@@ -278,7 +309,6 @@ func (v *View) drawWorkDir(ly Layout) {
 		return
 	}
 	if len(v.messages) > 0 {
-		hint := v.cfg.Hint
 		dir := v.workDir
 		x := 2
 		if v.sharkActive {
@@ -288,10 +318,10 @@ func (v *View) drawWorkDir(ly Layout) {
 		}
 		x = v.drawTextImgBg(x, ly.WorkRow+1, " "+dir, v.theme.DimFg)
 		remaining := ly.Inner - x
-		if remaining > runewidth.StringWidth(hint)+1 {
-			gap := remaining - runewidth.StringWidth(hint)
+		if v.tokenText != "" && remaining > runewidth.StringWidth(v.tokenText)+1 {
+			gap := remaining - runewidth.StringWidth(v.tokenText)
 			x = v.drawTextImgBg(x, ly.WorkRow+1, strings.Repeat(" ", gap), v.theme.DimFg)
-			v.drawTextImgBg(x, ly.WorkRow+1, hint, v.theme.HintFg)
+			v.drawTextImgBg(x, ly.WorkRow+1, v.tokenText, v.theme.HintFg)
 		} else {
 			v.drawTextImgBg(x, ly.WorkRow+1, strings.Repeat(" ", remaining), v.theme.DimFg)
 		}
@@ -340,30 +370,40 @@ func (v *View) drawArtRowAt(i, sy int) {
 	x := 1 + v.artPad()
 	text := v.art.texts[i]
 	leftW := v.art.leftW[i]
+	solidBg := i >= len(v.art.texts)-2
+	if solidBg {
+		for cx := x - 1; cx <= x+v.art.width; cx++ {
+			v.screen.SetCell(cx, sy, ' ', style.Color{}, v.theme.LogoDepthBg)
+		}
+	}
 	if i == 1 {
-		x = v.drawArtMiddleRow(x, sy, text, leftW)
+		x = v.drawArtMiddleRow(x, sy, text, leftW, solidBg)
 	} else {
-		x = v.drawArtPlainRow(x, sy, text, leftW)
+		x = v.drawArtPlainRow(x, sy, text, leftW, solidBg)
 	}
 	if i == len(v.art.texts)-1 && v.cfg.ModelName != "" {
-		v.drawTextImgBg(x, sy, " "+v.cfg.ModelName, v.theme.ModelFg)
+		if solidBg {
+			v.drawTextImgBg(x+1, sy, v.cfg.ModelName, v.theme.ModelFg)
+		} else {
+			v.drawTextImgBg(x, sy, " "+v.cfg.ModelName, v.theme.ModelFg)
+		}
 	}
 }
 
-// drawSharkAnimation 在 (x,sy) 处绘制鲨鱼动画 [■ ■ 🦈 ■ ■]，frame 指定位置。
+// drawSharkAnimation 在 (x,sy) 处绘制鲨鱼动画 [==🦈======]，frame 指定位置。
 func (v *View) drawSharkAnimation(x, sy int) int {
-	frame := v.sharkFrame
 	fg := v.theme.DimFg
 	v.screen.SetCell(x, sy, '[', fg, v.bg.BotColor(x, sy))
 	x += runewidth.RuneWidth('[')
+	frame := sharkDisplayPos(v.sharkFrame)
 	for pos := 0; pos < 5; pos++ {
 		if pos == frame {
 			v.screen.SetCell(x, sy, '🦈', style.RGB(0xFF, 0xFF, 0xFF), v.bg.BotColor(x, sy))
 			x += runewidth.RuneWidth('🦈')
 		} else {
-			v.screen.SetCell(x, sy, '▰', SharkGradient[pos], v.bg.BotColor(x, sy))
-			x += runewidth.RuneWidth('▰')
-			v.screen.SetCell(x, sy, ' ', style.Color{}, v.bg.BotColor(x, sy))
+			v.screen.SetCell(x, sy, '=', SharkGradient[pos], v.bg.BotColor(x, sy))
+			x++
+			v.screen.SetCell(x, sy, '=', SharkGradient[pos], v.bg.BotColor(x, sy))
 			x++
 		}
 	}
@@ -376,7 +416,7 @@ func (v *View) artPad() int {
 	return max((v.screen.Cols()-2-v.art.width)/2, 0)
 }
 
-func (v *View) drawArtPlainRow(x, sy int, text string, leftW int) int {
+func (v *View) drawArtPlainRow(x, sy int, text string, leftW int, solidBg bool) int {
 	cx := x
 	for _, r := range text {
 		if r != ' ' {
@@ -384,37 +424,38 @@ func (v *View) drawArtPlainRow(x, sy int, text string, leftW int) int {
 			if cx-x >= leftW {
 				fg = v.theme.ArtRight
 			}
-			v.screen.SetCell(cx, sy, r, fg, v.bg.BotColor(cx, sy))
+			bg := v.bg.BotColor(cx, sy)
+			if solidBg {
+				bg = v.theme.LogoDepthBg
+			}
+			v.screen.SetCell(cx, sy, r, fg, bg)
 		}
 		cx += runewidth.RuneWidth(r)
 	}
 	return cx
 }
 
-func (v *View) drawArtMiddleRow(x, sy int, text string, leftW int) int {
+func (v *View) drawArtMiddleRow(x, sy int, text string, leftW int, solidBg bool) int {
 	cx := x
 	for _, r := range text {
 		rel := cx - x
-		isDepth := rel < 4 ||
+		isDepth := solidBg ||
+			rel < 4 ||
 			(rel >= 23 && rel < 27) ||
 			(rel >= leftW && rel < leftW+4) ||
 			(rel >= leftW+5 && rel < leftW+9) ||
 			(rel >= leftW+15 && rel < leftW+19)
-		if isDepth {
-			v.screen.SetCell(cx, sy, ' ', style.Color{}, v.theme.LogoDepthBg)
-			if r != ' ' {
-				fg := v.theme.ArtLeft
-				if rel >= leftW {
-					fg = v.theme.ArtRight
-				}
-				v.screen.SetCell(cx, sy, r, fg, v.theme.LogoDepthBg)
-			}
-		} else if r != ' ' {
+		bg := v.theme.LogoDepthBg
+		if !isDepth {
+			bg = v.bg.BotColor(cx, sy)
+		}
+		v.screen.SetCell(cx, sy, ' ', style.Color{}, bg)
+		if r != ' ' {
 			fg := v.theme.ArtLeft
 			if rel >= leftW {
 				fg = v.theme.ArtRight
 			}
-			v.screen.SetCell(cx, sy, r, fg, v.bg.BotColor(cx, sy))
+			v.screen.SetCell(cx, sy, r, fg, bg)
 		}
 		cx += runewidth.RuneWidth(r)
 	}
@@ -426,7 +467,7 @@ func (v *View) drawArtMiddleRow(x, sy int, text string, leftW int) int {
 // 默认（极大值）钳制到底部，使最新消息可见。钳制后的偏移写回 v.msgScroll，
 // 供事件循环读取，让“到底后上滚”从真实底部开始。
 func (v *View) drawScrollContent(ly Layout, bubbleLines []msgLine) {
-	viewRows := ly.Sep1 // 内容行 0..Sep1-1
+	viewRows := max(ly.Sep1-1, 0) // 留一行透出壁纸，在气泡与输入栏之间形成隔断
 	if viewRows <= 0 {
 		return
 	}
@@ -445,6 +486,7 @@ func (v *View) drawScrollContent(ly Layout, bubbleLines []msgLine) {
 		scroll = 0
 	}
 	v.msgScroll = scroll // 写回钳制结果
+	v.lastMaxScroll = maxScroll
 
 	contentX := ly.EdgeX + 1
 	bgW := max(ly.Inner-ly.EdgeX-1, 0)
@@ -500,6 +542,9 @@ func (v *View) drawBubbleLineAt(line msgLine, idx, sy, contentX, bgW int, opacit
 	textFg := v.theme.InputTextFg
 	if line.isReasoning {
 		textFg = v.theme.DimFg
+	}
+	if line.isReasoningLabel {
+		textFg = v.theme.HintFg
 	}
 
 	// 选区高亮：把 rune 列区间转成相对文本起列(contentX+1)的显示单元格区间。

@@ -1,16 +1,27 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-runewidth"
 )
 
 // Message 表示会话历史中的一条记录。
 type Message struct {
-	Role      string // "user" 或 "assistant"
-	Content   string
-	Reasoning string // 模型的思考过程（如推理模型的 reasoning_content）
+	Role             string        // "user" 或 "assistant"
+	Content          string        // 最终回答
+	Reasoning        string        // 模型的思考过程（如推理模型的 reasoning_content）
+	ThinkingDuration time.Duration // 思考耗时，0 表示未知
+	TokenUsage       *TokenUsage   // API 返回的实际 token 消耗，流中为 nil
+}
+
+// TokenUsage 记录一次 API 调用的 token 消耗。
+type TokenUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
 }
 
 // lineKind 标识一行渲染出的气泡行的类型。
@@ -24,10 +35,11 @@ const (
 
 // msgLine 是会话区中渲染出的一行。
 type msgLine struct {
-	kind        lineKind
-	msgIdx      int
-	text        string
-	isReasoning bool // 思考过程行，用较暗的颜色渲染
+	kind             lineKind
+	msgIdx           int
+	text             string
+	isReasoning      bool   // 思考过程行，用较暗的颜色渲染
+	isReasoningLabel bool   // "Thinking" 标签行，用特殊颜色渲染
 }
 
 // streamKind 标识合并滚动流中一行的类型。
@@ -75,19 +87,28 @@ func buildBubbleLines(msgs []Message, textW int) []msgLine {
 		}
 		out = append(out, msgLine{kind: kindPad, msgIdx: i})
 		if m.Reasoning != "" {
-			wraps := wrapLines(m.Reasoning, textW)
+			label := "Thinking"
+			if m.ThinkingDuration > 0 {
+				label = fmt.Sprintf("Thinking (%.0fs)", m.ThinkingDuration.Seconds())
+			}
+			out = append(out, msgLine{kind: kindText, msgIdx: i, text: label, isReasoningLabel: true})
+			out = append(out, msgLine{kind: kindPad, msgIdx: i})
+			wraps := wrapLines(strings.TrimRight(m.Reasoning, "\n"), textW)
 			for _, w := range wraps {
 				out = append(out, msgLine{kind: kindText, msgIdx: i, text: w, isReasoning: true})
 			}
+			out = append(out, msgLine{kind: kindPad, msgIdx: i})
 		}
-		wraps := wrapLines(m.Content, textW)
-		if len(wraps) == 0 {
-			wraps = []string{""}
+		if m.Content != "" || m.Reasoning == "" {
+			wraps := wrapLines(m.Content, textW)
+			if len(wraps) == 0 {
+				wraps = []string{""}
+			}
+			for _, w := range wraps {
+				out = append(out, msgLine{kind: kindText, msgIdx: i, text: w})
+			}
+			out = append(out, msgLine{kind: kindPad, msgIdx: i})
 		}
-		for _, w := range wraps {
-			out = append(out, msgLine{kind: kindText, msgIdx: i, text: w})
-		}
-		out = append(out, msgLine{kind: kindPad, msgIdx: i})
 	}
 	return out
 }
@@ -132,7 +153,11 @@ func wrapLines(text string, maxW int) []string {
 				for i := start; i < n; i++ {
 					rw := runewidth.RuneWidth(runes[i])
 					if w+rw > maxW {
-						breakAt = i
+						if i == start {
+							breakAt = i + 1 // 单个字符已超 maxW，至少前进一步
+						} else {
+							breakAt = i
+						}
 						break
 					}
 					w += rw

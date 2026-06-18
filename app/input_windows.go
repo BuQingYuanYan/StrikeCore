@@ -78,6 +78,7 @@ func readInput(ctx context.Context, term terminal.Terminal, inputCh chan<- []byt
 
 	var rec terminal.InputRecord
 	var leftDown bool // 跨事件追踪左键是否按住，用于区分拖拽与普通移动
+	var surrogatePending uint16 // 待处理的 UTF-16 高代理项（如表情包等增补平面字符）
 	for {
 		select {
 		case <-ctx.Done():
@@ -112,6 +113,34 @@ func readInput(ctx context.Context, term terminal.Terminal, inputCh chan<- []byt
 			ke := rec.KeyEvent
 			if ke.KeyDown == 0 {
 				continue // 键释放
+			}
+
+			ch := ke.UnicodeChar
+
+			// 处理 UTF-16 代理项对（表情包等增补平面字符）。
+			// ReadConsoleInputW 返回的是 UTF-16 编码，增补平面字符会拆成两个
+			// KEY_EVENT_RECORD（高代理 + 低代理）。这里把它们拼合成一个 rune，
+			// 再以 UTF-8 字节序列发送，避免逐一半编码导致的乱码。
+			if surrogatePending != 0 {
+				if ch >= 0xDC00 && ch <= 0xDFFF {
+					r := rune(0x10000 + uint32(surrogatePending-0xD800)*0x400 + uint32(ch-0xDC00))
+					surrogatePending = 0
+					buf := make([]byte, utf8.UTFMax)
+					n := utf8.EncodeRune(buf, r)
+					select {
+					case inputCh <- buf[:n]:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				// 上一个高代理后未紧跟低代理，丢弃
+				surrogatePending = 0
+			}
+
+			if ch >= 0xD800 && ch <= 0xDBFF {
+				surrogatePending = ch
+				continue
 			}
 
 			buf := keyEventToBytes(ke)
@@ -224,6 +253,25 @@ func keyEventToBytes(ke terminal.KeyEventRecord) []byte {
 	ctrl := ke.ControlKeyState
 	alt := ctrl&terminal.LeftAltPressed != 0 || ctrl&terminal.RightAltPressed != 0
 
+	// Alt+Enter/Tab/Backspace/Escape：加 ESC 前缀
+	if alt {
+		switch {
+		case ch == '\r' || ch == '\n':
+			return []byte{0x1b, '\r'}
+		case ch == '\t':
+			return []byte{0x1b, '\t'}
+		case ch == '\b':
+			return []byte{0x1b, 0x7f}
+		case ch == 0x1b:
+			return []byte{0x1b, 0x1b}
+		}
+		r := utf8.EncodeRune(buf8[:], rune(ch))
+		out := make([]byte, 0, r+1)
+		out = append(out, 0x1b)
+		out = append(out, buf8[:r]...)
+		return out
+	}
+
 	switch {
 	case ch == '\r' || ch == '\n':
 		return []byte{'\r'}
@@ -241,15 +289,6 @@ func keyEventToBytes(ke terminal.KeyEventRecord) []byte {
 	}
 	if ctrl&(terminal.LeftCtrlPressed|terminal.RightCtrlPressed) != 0 && ch >= 'A' && ch <= 'Z' {
 		return []byte{byte(ch - 'A' + 1)}
-	}
-
-	// Alt+字符：添加 ESC 前缀。
-	if alt {
-		r := utf8.EncodeRune(buf8[:], rune(ch))
-		out := make([]byte, 0, r+1)
-		out = append(out, 0x1b)
-		out = append(out, buf8[:r]...)
-		return out
 	}
 
 	// 纯 UTF-8 字符。

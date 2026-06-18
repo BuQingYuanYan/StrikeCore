@@ -3,11 +3,20 @@ package llm
 
 import "context"
 
-// Message 表示一条对话消息。
+// Usage 表示一次 API 调用的 token 消耗统计。
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// Message 表示一条对话消息或流式输出块。
+// 流式场景下 Usage 仅在最后一个消息块中有值，其余为 nil。
 type Message struct {
 	Role             string `json:"role"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Usage            *Usage `json:"usage,omitempty"`
 }
 
 // Provider 是 LLM 后端的抽象接口，支持切换不同模型供应商。
