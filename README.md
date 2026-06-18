@@ -18,7 +18,7 @@
 
 StrikeCore 是一个运行在终端中的 AI 智能体，提供沉浸式全屏 TUI 交互体验。它不是一个聊天网页的终端克隆，而是一个**为终端原生设计的 AI 交互环境**——从像素级渲染到事件循环，全部自研。
 
-> 你看到的不是一个聊天网页，而是一个**有生命的终端智能体**。
+> 你面对的，不是一个对话框——而是一头游弋在终端里的鲨鱼。
 
 <p align="center">
   <img src="screenshot.png" alt="StrikeCore 界面预览" width="100%" style="border-radius: 8px;">
